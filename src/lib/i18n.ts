@@ -30,7 +30,7 @@ const zh = {
   beta: "Beta",
   loadingTitle: "正在读取本机 AI 工具的登录信息…",
   emptyTitle: "没有检测到已登录的 AI 工具",
-  emptyBody: "登录 Codex、Claude Code、Gemini CLI 或 GitHub Copilot 后会自动出现在这里；DeepSeek、OpenRouter 等可在设置中填写 API Key。",
+  emptyBody: "登录 Codex、Claude Code、Antigravity、Grok 或 GitHub Copilot 后会自动出现在这里；DeepSeek、OpenRouter 等可在设置中填写 API Key。",
   addKey: "填写 API Key",
   // Issues
   notInstalledTitle: "未找到 {name} CLI",
@@ -132,7 +132,7 @@ const en: Dict = {
   beta: "Beta",
   loadingTitle: "Reading AI tool logins on this machine…",
   emptyTitle: "No signed-in AI tools found",
-  emptyBody: "Sign in to Codex, Claude Code, Gemini CLI or GitHub Copilot and they appear here. Add API keys for DeepSeek, OpenRouter and others in Settings.",
+  emptyBody: "Sign in to Codex, Claude Code, Antigravity, Grok or GitHub Copilot and they appear here. Add API keys for DeepSeek, OpenRouter and others in Settings.",
   addKey: "Add an API key",
   notInstalledTitle: "{name} CLI not found",
   notInstalledBody: "Install {name}; it is detected automatically.",

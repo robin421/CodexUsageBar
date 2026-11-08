@@ -1,9 +1,10 @@
+pub mod agy;
 pub mod claude;
 pub mod codebuff;
 pub mod codex;
 pub mod copilot;
 pub mod cursor;
-pub mod gemini;
+pub mod grok;
 pub mod jetbrains;
 pub mod keyed;
 pub mod opencode;
@@ -16,7 +17,8 @@ pub async fn fetch(id: ProviderId, ctx: &Ctx) -> Result<Snapshot> {
     match id {
         ProviderId::Codex => codex::fetch(ctx).await,
         ProviderId::Claude => claude::fetch(ctx).await,
-        ProviderId::Gemini => gemini::fetch(ctx).await,
+        ProviderId::Agy => agy::fetch(ctx).await,
+        ProviderId::Grok => grok::fetch(ctx).await,
         ProviderId::Copilot => copilot::fetch(ctx).await,
         ProviderId::Opencode => opencode::fetch(ctx).await,
         ProviderId::Cursor => cursor::fetch(ctx).await,

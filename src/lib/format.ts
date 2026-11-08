@@ -97,11 +97,12 @@ export function hhmm(iso: string | null, lang: Lang): string {
 }
 
 export const MONOGRAM: Record<ProviderId, string> = {
-  codex: "Cx", claude: "Cl", gemini: "Gm", copilot: "Gh", opencode: "Oc", cursor: "Cu", jetbrains: "Jb",
+  codex: "Cx", claude: "Cl", agy: "Ag", gemini: "Gm", grok: "Gk", copilot: "Gh", opencode: "Oc", cursor: "Cu", jetbrains: "Jb",
   codebuff: "Cb", openrouter: "Or", deepseek: "Ds", moonshot: "Ki", zai: "Z", minimax: "Mm",
 };
 
 export const ENV_KEYS: Partial<Record<ProviderId, string>> = {
+  agy: "ANTIGRAVITY_API_KEY", gemini: "GEMINI_API_KEY", grok: "GROK_API_KEY",
   openrouter: "OPENROUTER_API_KEY", deepseek: "DEEPSEEK_API_KEY", moonshot: "MOONSHOT_API_KEY",
   zai: "Z_AI_API_KEY", minimax: "MINIMAX_API_KEY", codebuff: "CODEBUFF_API_KEY", opencode: "OPENCODE_API_KEY",
 };

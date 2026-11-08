@@ -66,7 +66,7 @@ struct DiagnosticEntry {
 #[tauri::command]
 async fn diagnostics() -> Vec<DiagnosticEntry> {
     let ctx = Ctx::new(Default::default()).await;
-    let mut out: Vec<DiagnosticEntry> = ["codex", "claude", "gemini", "gh", "opencode", "codebuff"]
+    let mut out: Vec<DiagnosticEntry> = ["codex", "claude", "agy", "grok", "gh", "opencode", "codebuff"]
         .iter()
         .map(|bin| DiagnosticEntry { label: format!("{bin} CLI"), value: ctx.find_bin(bin).map(|p| p.display().to_string()) })
         .collect();

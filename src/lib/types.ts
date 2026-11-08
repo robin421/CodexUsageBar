@@ -1,7 +1,7 @@
 // Mirrors the serde types in crates/quota-core/src/model.rs and src-tauri/src/{state,settings}.rs.
 
 export type ProviderId =
-  | "codex" | "claude" | "gemini" | "copilot" | "opencode" | "cursor" | "jetbrains"
+  | "codex" | "claude" | "agy" | "gemini" | "grok" | "copilot" | "opencode" | "cursor" | "jetbrains"
   | "codebuff" | "openrouter" | "deepseek" | "moonshot" | "zai" | "minimax";
 
 export type WindowKind = "session" | "daily" | "weekly" | "monthly" | "other";

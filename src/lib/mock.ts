@@ -12,7 +12,7 @@ function w(id: string, mins: number | null, used: number, resetIn: number | null
 }
 
 const NAMES: Record<ProviderId, string> = {
-  codex: "Codex", claude: "Claude Code", gemini: "Gemini CLI", copilot: "GitHub Copilot", opencode: "OpenCode Go",
+  codex: "Codex", claude: "Claude Code", agy: "Antigravity", gemini: "Antigravity", grok: "Grok", copilot: "GitHub Copilot", opencode: "OpenCode Go",
   cursor: "Cursor", jetbrains: "JetBrains AI", codebuff: "Codebuff", openrouter: "OpenRouter", deepseek: "DeepSeek",
   moonshot: "Moonshot / Kimi", zai: "Z.ai / GLM", minimax: "MiniMax",
 };

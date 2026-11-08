@@ -98,7 +98,7 @@ mod tests {
         let reports = vec![
             report_from(ProviderId::Claude, Ok(a), None),
             report_from(ProviderId::Codex, Ok(b), None),
-            report_from(ProviderId::Gemini, Err(FetchError::Network("x".into())), None),
+            report_from(ProviderId::Agy, Err(FetchError::Network("x".into())), None),
         ];
         let o = Overview::from_reports(&reports, &Thresholds::default());
         assert_eq!(o.tightest_provider, Some(ProviderId::Codex));

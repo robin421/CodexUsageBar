@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 pub enum ProviderId {
     Codex,
     Claude,
-    Gemini,
+    #[serde(alias = "gemini")]
+    Agy,
+    Grok,
     Copilot,
     Opencode,
     Cursor,
@@ -28,10 +30,11 @@ pub enum AuthKind {
 }
 
 impl ProviderId {
-    pub const ALL: [ProviderId; 13] = [
+    pub const ALL: [ProviderId; 14] = [
         ProviderId::Codex,
         ProviderId::Claude,
-        ProviderId::Gemini,
+        ProviderId::Agy,
+        ProviderId::Grok,
         ProviderId::Copilot,
         ProviderId::Opencode,
         ProviderId::Cursor,
@@ -48,7 +51,8 @@ impl ProviderId {
         match self {
             ProviderId::Codex => "codex",
             ProviderId::Claude => "claude",
-            ProviderId::Gemini => "gemini",
+            ProviderId::Agy => "agy",
+            ProviderId::Grok => "grok",
             ProviderId::Copilot => "copilot",
             ProviderId::Opencode => "opencode",
             ProviderId::Cursor => "cursor",
@@ -63,6 +67,9 @@ impl ProviderId {
     }
 
     pub fn from_slug(s: &str) -> Option<Self> {
+        if s == "gemini" {
+            return Some(ProviderId::Agy);
+        }
         Self::ALL.into_iter().find(|p| p.slug() == s)
     }
 
@@ -70,7 +77,8 @@ impl ProviderId {
         match self {
             ProviderId::Codex => "Codex",
             ProviderId::Claude => "Claude Code",
-            ProviderId::Gemini => "Gemini CLI",
+            ProviderId::Agy => "Antigravity",
+            ProviderId::Grok => "Grok",
             ProviderId::Copilot => "GitHub Copilot",
             ProviderId::Opencode => "OpenCode Go",
             ProviderId::Cursor => "Cursor",
@@ -108,7 +116,8 @@ impl ProviderId {
         match self {
             ProviderId::Codex => Some("codex login"),
             ProviderId::Claude => Some("claude"),
-            ProviderId::Gemini => Some("gemini"),
+            ProviderId::Agy => Some("agy"),
+            ProviderId::Grok => Some("grok"),
             ProviderId::Copilot => Some("gh auth login"),
             ProviderId::Opencode => Some("opencode auth login"),
             ProviderId::Codebuff => Some("codebuff login"),
@@ -119,6 +128,8 @@ impl ProviderId {
     /// Environment variables checked for an API key when none is configured.
     pub fn env_keys(self) -> &'static [&'static str] {
         match self {
+            ProviderId::Agy => &["ANTIGRAVITY_API_KEY", "GEMINI_API_KEY"],
+            ProviderId::Grok => &["GROK_API_KEY", "XAI_API_KEY"],
             ProviderId::Openrouter => &["OPENROUTER_API_KEY"],
             ProviderId::Deepseek => &["DEEPSEEK_API_KEY"],
             ProviderId::Moonshot => &["MOONSHOT_API_KEY", "KIMI_API_KEY"],
@@ -134,7 +145,8 @@ impl ProviderId {
         match self {
             ProviderId::Codex => "https://chatgpt.com/codex/settings/usage",
             ProviderId::Claude => "https://claude.ai/settings/usage",
-            ProviderId::Gemini => "https://aistudio.google.com/",
+            ProviderId::Agy => "https://antigravity.google/",
+            ProviderId::Grok => "https://grok.com/",
             ProviderId::Copilot => "https://github.com/settings/copilot",
             ProviderId::Opencode => "https://opencode.ai/auth",
             ProviderId::Cursor => "https://cursor.com/dashboard?tab=usage",
