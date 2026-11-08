@@ -5,3 +5,6 @@ dist/
 DerivedData/
 *.xcuserstate
 xcuserdata/
+node_modules/
+target/
+src-tauri/gen/

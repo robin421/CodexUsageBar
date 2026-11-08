@@ -1,0 +1,85 @@
+/*
+ * Design tokens. The brand is a graphite ring gauge on paper; colour is reserved for quota
+ * state (the same green / amber / red the tray icon uses), everything else is ink and paper.
+ */
+
+:root {
+  /* Type */
+  --font: "IBM Plex Sans", -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI",
+    "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", system-ui, sans-serif;
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 15px;
+  --fs-xl: 18px;
+  --fs-hero: 30px;
+  --lh-tight: 1.2;
+  --lh: 1.45;
+
+  /* Space (4px grid) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+
+  /* Shape */
+  --r-sm: 4px;
+  --r-md: 7px;
+  --r-lg: 12px;
+  --meter-h: 6px;
+
+  /* Motion */
+  --dur-fast: 120ms;
+  --dur: 220ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  /* Light palette */
+  --paper: #f4f5f6;
+  --surface: #ffffff;
+  --inset: #eceef0;
+  --line: #e1e3e6;
+  --line-strong: #cdd0d5;
+  --ink: #17181a;
+  --ink-2: #555a61;
+  --ink-3: #82878f;
+  --on-ink: #ffffff;
+
+  --ok: #1f9d57;
+  --ok-fill: #2fb36b;
+  --warn: #b26a00;
+  --warn-fill: #f09a1a;
+  --crit: #cf2c33;
+  --crit-fill: #e5484d;
+  --warn-wash: #fdf3e2;
+  --crit-wash: #fdeced;
+
+  --shadow-pop: 0 1px 2px rgb(16 18 20 / 6%), 0 8px 24px rgb(16 18 20 / 8%);
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --paper: #121315;
+  --surface: #1b1c1f;
+  --inset: #26282c;
+  --line: #2c2e33;
+  --line-strong: #3a3d43;
+  --ink: #eceef0;
+  --ink-2: #a5aab2;
+  --ink-3: #757a83;
+  --on-ink: #121315;
+
+  --ok: #43c97f;
+  --ok-fill: #36bb72;
+  --warn: #f5ad3c;
+  --warn-fill: #f0a024;
+  --crit: #ff6b70;
+  --crit-fill: #ec5459;
+  --warn-wash: #33280f;
+  --crit-wash: #3a1b1d;
+
+  --shadow-pop: 0 1px 2px rgb(0 0 0 / 40%), 0 10px 28px rgb(0 0 0 / 35%);
+  color-scheme: dark;
+}

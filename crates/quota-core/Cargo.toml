@@ -1,0 +1,31 @@
+[package]
+name = "quota-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Reads AI coding tool quotas (Codex, Claude Code, Gemini CLI, Copilot, ...) from local logins"
+
+[lib]
+name = "quota_core"
+
+[[bin]]
+name = "usagebar"
+path = "src/bin/usagebar.rs"
+
+[dependencies]
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
+dirs = "6"
+futures = "0.3"
+regex = "1"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "gzip"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tiny-skia = { version = "0.11", default-features = false, features = ["std", "simd", "png-format"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "time", "sync"] }
+which = "7"
+
+[dev-dependencies]
+tempfile = "3"

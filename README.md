@@ -1,130 +1,104 @@
-# Codex Usage Bar (macOS 原生菜单栏额度工具)
+# CodexUsageBar
 
-一款轻量级、常驻 macOS 顶部菜单栏的原生应用，专为 ChatGPT / Codex 套餐用户打造。通过与本地官方 `codex app-server` 的 STDIO JSON-RPC 2.0 协议直连，实时精准展示账号套餐额度、重置倒计时与预警通知。
+常驻托盘的 AI 额度表：一眼看清本机每个 AI 编程工具还剩多少额度、什么时候重置。支持 **macOS / Windows / Linux**。
 
----
+<p>
+  <img src="docs/panel-light.png" width="300" alt="面板：最低余量、重置时间线与各服务额度" />
+  <img src="docs/panel-dark.png" width="300" alt="深色模式：额度告急状态" />
+</p>
 
-## 核心特性
+## 功能
 
-- **100% 原生 Swift + SwiftUI 开发**：无 Electron、无 WebView、无额外外部服务端，安装包仅约 600KB，运行时极低资源占用。
-- **官方 App Server JSON-RPC 直连**：
-  - 通过 `initialize` -> `account/read` -> `account/rateLimits/read` 获取真实额度。
-  - 严格区分 ChatGPT 套餐额度与 OpenAI API Token 余额，坚决不通过 Token 消耗推算套餐额度。
-- **多窗口动态识别**：
-  - 不预设窗口数量，动态解析服务端返回的配额窗口。
-  - 根据 `windowDurationMins` 智能分类（5小时、24小时、每周等）。
-- **重置时间与精确倒计时**：
-  - 毫秒级重置时间戳转换为本地时区展示。
-  - 实时动态计算“还有 X 小时 Y 分钟”倒计时。
-- **原生额度预警与通知**：
-  - 额度低于 20% 黄色预警，低于 10% 红色告急。
-  - 周期内自动去重，避免重复打扰；重置后自动恢复提醒。
-- **自动化生命周期**：
-  - 支持定时自动刷新（默认 5 分钟，支持自定义 1m/5m/15m/30m）。
-  - 支持从 macOS 睡眠恢复（Wake from sleep）时立即自动刷新。
-  - 启动时优先展示本地缓存快照，网络失败自动降级标记数据过期。
-- **开机自动启动**：
-  - 采用现代 macOS `SMAppService.mainApp` API，无侵入式登录项管理。
+- **自动发现已登录的工具**：直接复用本机 CLI / 应用的登录，不需要重新授权。
+- **剩余额度与重置时间**：每个额度窗口（5 小时、每日、每周、每月、按模型）都显示剩余百分比、倒计时和具体重置时刻。
+- **重置时间线**：未来 7 天内各服务额度何时恢复，一条时间轴看完。
+- **使用节奏**：进度条上的刻度表示按时间均匀消耗时“应剩”的位置；用得比节奏快会提示。
+- **状态图标**：托盘圆环的长度等于全局最低余量，颜色随之变化（绿 / 琥珀 / 红），刷新失败时带红点角标。macOS 正常时使用模板图标融入菜单栏。
+- **预警通知**：低于 20% / 10%（可调）时发系统通知，同一重置周期内只提醒一次；额度重置后可选提醒。
+- **离线可用**：启动即显示上次的数据；网络失败时标记“数据已过期”而不是清空。
+- **自动刷新**：1 / 5 / 15 / 30 分钟，睡眠唤醒后立即刷新，打开面板时数据超过 1 分钟也会刷新。
+- 开机自启、浅色 / 深色 / 跟随系统、简体中文 / English。
 
----
+<img src="docs/tray-icons.png" width="540" alt="托盘图标状态：正常、预警、告急、过期、空闲、错误（彩色与 macOS 模板两种样式）" />
 
-## 系统与环境要求
+## 支持的服务
 
-- **macOS**：macOS 14.0 (Sonoma) 或更高版本
-- **架构**：Apple Silicon (M1/M2/M3/M4) 及 Intel Mac
-- **依赖**：本机已安装 [Codex CLI](https://learn.chatgpt.com/docs/codex) 并在终端中完成 `codex login`
+| 服务 | 读取方式 | 显示内容 |
+|---|---|---|
+| **Codex** (ChatGPT) | `~/.codex/auth.json` → ChatGPT usage 接口；失败时回退到官方 `codex app-server` | 5 小时、每周额度，可用重置次数 |
+| **Claude Code** | `~/.claude/.credentials.json`，macOS 为钥匙串 `Claude Code-credentials` | 5 小时、每周、Opus / Sonnet 每周额度 |
+| **Gemini CLI** | `~/.gemini/oauth_creds.json` → Code Assist 配额接口 | 各模型每日剩余比例 |
+| **GitHub Copilot** | Copilot 编辑器插件登录或 `gh` CLI 登录 | Premium 请求、Chat / 补全月度额度 |
+| **OpenCode Go** (Beta) | `~/.local/share/opencode` 中的 CLI 登录 | 5 小时、每周、每月额度 |
+| **Cursor** (Beta) | Cursor 桌面应用的本地登录（`state.vscdb`） | 当月套餐用量、按量付费余额 |
+| **JetBrains AI** (Beta) | IDE 本地配额文件，无需联网 | 每月额度、充值余额 |
+| **Codebuff** (Beta) | `~/.config/manicode/credentials.json` | 额度与余额 |
+| OpenRouter、DeepSeek、Moonshot / Kimi、Z.ai / 智谱 GLM、MiniMax | 在设置中填写 API Key（或环境变量） | 余额、Coding Plan 额度 |
 
----
+没有登录的服务不会出现在面板里；可在 **设置 → 服务** 中查看检测状态、单独关闭某个服务。
 
-## 快速构建与运行
+<img src="docs/settings.png" width="600" alt="设置：服务检测状态与 API Key" />
 
-### 方式一：直接运行构建脚本生成 .app 与 .dmg
+## 隐私
 
-在终端执行：
-```bash
-./scripts/build_release.sh
-```
-构建产物将保存在 `dist/` 目录：
-- `dist/CodexUsageBar.app`：原生可执行应用
-- `dist/CodexUsageBar.dmg`：可直接拖拽安装的 DMG 镜像包
-- `dist/CodexUsageBar-macOS.zip`：便携压缩包
+- 只读取本机已有的登录信息，直接请求各服务商的官方接口，不经过任何第三方服务器，没有统计或上报。
+- 凭据只读：不会改写 `auth.json`、`.credentials.json` 等文件。Claude Code 令牌过期时提示你运行一次 `claude` 让它自己刷新；Gemini 的令牌只在内存中刷新。
+- 与 v1 不同：为了支持多家服务，v2 会读取本地 OAuth 令牌（只读）来调用官方用量接口。
+- API Key 保存在本机配置文件中（Linux / macOS 权限为 600）：
+  - Linux `~/.config/codexusagebar/config.json`
+  - macOS `~/Library/Application Support/codexusagebar/config.json`
+  - Windows `%APPDATA%\codexusagebar\config.json`
 
-### 方式二：使用 Xcode 打开工程开发调试
+## 安装
 
-1. 确保已安装 [XcodeGen](https://github.com/yonaskolb/XcodeGen)（已通过 Homebrew 安装）：
-   ```bash
-   brew install xcodegen
-   ```
-2. 生成 Xcode 工程：
-   ```bash
-   xcodegen generate
-   ```
-3. 打开生成的 `CodexUsageBar.xcodeproj`：
-   ```bash
-   open CodexUsageBar.xcodeproj
-   ```
-4. 在 Xcode 中直接选择 `CodexUsageBar` Scheme 进行编译或运行单元测试（`Cmd + U`）。
+从 [Releases](https://github.com/robin421/CodexUsageBar/releases) 下载对应平台的安装包：macOS `.dmg`、Windows `.msi` / `.exe`、Linux `.deb` / `.AppImage`。
 
-### 方式三：运行单元测试
+平台说明：
+
+- **macOS**：只在菜单栏显示，不占 Dock；菜单栏文字模式可选“完整 / 紧凑 / 仅图标”。
+- **Windows**：点击托盘图标打开面板；悬停可看到各服务摘要。
+- **Linux**：托盘基于 AppIndicator。GNOME 需要安装 [AppIndicator 扩展](https://extensions.gnome.org/extension/615/appindicator-support/)。AppIndicator 不支持左键事件，请从托盘菜单选择“打开面板”。菜单中也直接列出了每个服务的最低余量。
+
+## 命令行
+
+核心库附带一个 CLI，便于排查或在脚本里使用：
 
 ```bash
-xcodebuild test -project CodexUsageBar.xcodeproj -scheme CodexUsageBar -destination 'platform=macOS'
+cargo run -p quota-core --bin usagebar            # 人类可读
+cargo run -p quota-core --bin usagebar -- --json  # JSON
+cargo run -p quota-core --bin usagebar -- --all --en
 ```
 
----
+## 开发
 
-## 工程目录结构
+依赖：Rust stable、Node 20+；Linux 还需要 `libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev`。
 
-```
-CodexUsageBar/
-├── project.yml                     # XcodeGen 规范配置文件
-├── CodexUsageBar.xcodeproj         # 生成的 Xcode 工程
-├── Sources/
-│   ├── App/
-│   │   └── CodexUsageBarApp.swift   # 应用入口与 MenuBarExtra 配置
-│   ├── Core/
-│   │   ├── CLIPathFinder.swift      # Codex 可执行文件动态发现
-│   │   ├── CodexAppServerClient.swift # App Server 进程与 JSON-RPC 客户端
-│   │   └── JSONRPCTransport.swift   # STDIO JSONL 异步管道通信
-│   ├── Models/
-│   │   ├── AppStatus.swift          # 应用与认证连接状态机
-│   │   └── UsageModels.swift        # 协议与领域数据模型
-│   ├── Services/
-│   │   ├── LaunchAtLoginManager.swift # macOS 13+ 开机自启服务
-│   │   ├── NotificationManager.swift # 原生系统通知与去重
-│   │   ├── UsageCacheManager.swift  # 本地快照缓存
-│   │   └── UsageRepository.swift    # 状态聚合与并发去重管理
-│   └── UI/
-│       ├── MenuBarStyle.swift       # 菜单栏显示模式枚举
-│       ├── SettingsView.swift       # 原生设置面板（常规/预警/诊断）
-│       ├── SettingsWindowController.swift # 设置窗口控制器
-│       ├── UsageCardView.swift      # 额度进度卡片组件
-│       └── UsagePopoverView.swift   # 菜单栏主详情 Popover
-├── Tests/
-│   ├── NotificationManagerTests.swift # 通知触发与去重单测
-│   ├── UsageCacheTests.swift        # 缓存读写与清空单测
-│   └── UsageModelsTests.swift       # 协议解析、窗口计算与倒计时单测
-├── scripts/
-│   └── build_release.sh             # 自动化 Release 构建与打包脚本
-└── dist/                            # 构建就绪产物
-    ├── CodexUsageBar.app
-    ├── CodexUsageBar.dmg
-    └── CodexUsageBar-macOS.zip
+```bash
+npm install
+npm run tauri dev      # 运行完整应用
+npm run tauri build    # 打包安装包
+cargo test -p quota-core
+npm run check          # 前端类型检查
 ```
 
----
+只调界面时可以直接 `npm run dev`，在浏览器打开 `http://localhost:1420/`，会使用内置的模拟数据：
 
-## 菜单栏展示模式说明
+- `?mock=rich|calm|critical|empty|loading|failed` 切换场景
+- `&theme=light|dark`、`&lang=zh|en`
+- `#/settings/general|providers|alerts|advanced` 打开设置页
 
-在“设置 -> 常规”中可自由切换菜单栏展示模式：
-1. **完整展示**（默认）：`Codex 5h 82% · 7d 64%`（动态展示前两个主要额度窗口剩余百分比）
-2. **紧凑展示**：`5h 82%`（仅展示最短周期主窗口）
-3. **仅展示图标**：使用 SF Symbol 图标，通过颜色（绿/橙/红）反映额度健康度，点击展开查看完整详情。
+### 目录结构
 
----
+```
+crates/quota-core/       各服务的额度读取（纯 Rust，不依赖界面，可单测）
+  src/providers/         codex, claude, gemini, copilot, opencode, cursor, jetbrains, codebuff, keyed(API Key)
+  src/icon.rs            托盘图标绘制
+  src/alerts.rs          预警去重
+  src/bin/usagebar.rs    命令行
+src-tauri/               托盘、面板窗口、定时刷新、通知、设置
+src/                     Svelte 界面（面板 + 设置）
+  styles/tokens.css      设计变量（颜色、字号、间距、圆角、动效）
+.github/workflows/       三平台构建
+```
 
-## 安全与隐私承诺
-
-- **无凭证盗取**：本软件不读取、不解析、不存储任何 `~/.codex/auth.json` 中的 OAuth Token 或敏感私钥。
-- **让 CLI 自主认证**：所有的认证刷新与权限检验均由系统中的官方 `codex` 原生进程维护。
-- **纯本地运行**：无云端代理、无第三方上报接口、无分析跟踪代码。
+v1 的 macOS 原生 Swift 版本保留在 git 标签 `v1-swift`。
