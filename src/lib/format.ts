@@ -22,8 +22,11 @@ export function span(ms: number, lang: Lang): string {
   return `${m}m`;
 }
 
-export function countdown(resetsAt: string | null, now: number, lang: Lang): string {
-  if (!resetsAt) return translate(lang, "resetsUnknown");
+export function countdown(resetsAt: string | null, now: number, lang: Lang, rem?: number | null): string {
+  if (!resetsAt) {
+    if (rem != null && Math.round(rem) >= 100) return lang === "zh" ? "额度充足" : "Full Quota";
+    return translate(lang, "resetsUnknown");
+  }
   const ms = Date.parse(resetsAt) - now;
   if (ms <= 0) return translate(lang, "resetDone");
   if (ms < 60_000) return translate(lang, "resetSoon");

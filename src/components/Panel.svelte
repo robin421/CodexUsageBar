@@ -23,10 +23,46 @@
   const ordered = $derived([...visible.filter((r) => r.snapshot), ...visible.filter((r) => !r.snapshot)]);
   const firstLoad = $derived(snap.reports.length === 0 || (snap.overview.any_loading && visible.every((r) => !r.snapshot) && !snap.last_refresh));
 
+  const agyReport = $derived(snap.reports.find((r) => r.id === "agy"));
+  const agyAccounts = $derived.by(() => {
+    const accs = new Set<string>();
+    for (const w of agyReport?.snapshot?.windows ?? []) {
+      if (w.account) accs.add(w.account);
+    }
+    if (accs.size === 0 && agyReport?.snapshot?.account) {
+      for (const a of agyReport.snapshot.account.split(",")) {
+        const trimmed = a.trim();
+        if (trimmed) accs.add(trimmed);
+      }
+    }
+    return Array.from(accs);
+  });
+
   let selectedFilter = $state<string>("all");
+  let selectedAccount = $state<string | null>(null);
+
   $effect(() => {
     if (snap.active_filter) {
       selectedFilter = snap.active_filter;
+    }
+  });
+
+  $effect(() => {
+    if (!selectedAccount && agyAccounts.length > 0) {
+      if (snap.active_agy_account && agyAccounts.includes(snap.active_agy_account)) {
+        selectedAccount = snap.active_agy_account;
+      } else {
+        selectedAccount = agyAccounts[0];
+      }
+    }
+  });
+
+  $effect(() => {
+    if (selectedFilter.startsWith("account:")) {
+      const email = selectedFilter.replace("account:", "").split("#")[0];
+      if (email && email !== selectedAccount) {
+        selectedAccount = email;
+      }
     }
   });
 
@@ -47,6 +83,10 @@
   function handleSelectFilter(id: string) {
     selectedFilter = id;
     api.setActiveFilter(id);
+  }
+
+  function handleSelectAccount(email: string) {
+    selectedAccount = email;
   }
 
   function handleSwitchAccount(email: string) {
@@ -112,14 +152,24 @@
           {lang}
           now={$now}
           {selectedFilter}
+          {selectedAccount}
           activeAgyAccount={snap.active_agy_account}
           onSelectFilter={handleSelectFilter}
+          onSelectAccount={handleSelectAccount}
           onSwitchAccount={handleSwitchAccount}
         />
       </div>
       <div class="list">
         {#each filteredOrdered as report (report.id)}
-          <ProviderSection {report} {thresholds} {lang} now={$now} onRetry={refresh} />
+          <ProviderSection
+            {report}
+            {thresholds}
+            {lang}
+            now={$now}
+            {selectedAccount}
+            {selectedFilter}
+            onRetry={refresh}
+          />
         {/each}
       </div>
     {/if}

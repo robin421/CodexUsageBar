@@ -145,6 +145,11 @@ pub async fn fetch(ctx: &Ctx) -> Result<Snapshot> {
         }
     }
 
+    // Ensure every account has all standard models (Gemini 3.8 Flash, Argon 4, Claude & GPT)
+    for (email, _) in &accounts {
+        ensure_account_models_complete(&mut combined, email, is_multi_account);
+    }
+
     if combined.windows.is_empty() {
         return Err(FetchError::parse("no active quota buckets found"));
     }
@@ -153,12 +158,128 @@ pub async fn fetch(ctx: &Ctx) -> Result<Snapshot> {
     combined.plan = Some(if has_pro { "Pro".into() } else { "Antigravity".into() });
 
     // Sort windows: shorter windows (session 5h) first, then weekly, grouped by scope
-    combined.windows.sort_by_key(|w| (w.scope.clone(), w.window_mins.unwrap_or(u32::MAX)));
+    combined.windows.sort_by_key(|w| (w.account.clone(), w.scope.clone(), w.window_mins.unwrap_or(u32::MAX)));
 
     Ok(combined)
 }
 
+fn ensure_account_models_complete(
+    combined: &mut Snapshot,
+    email: &str,
+    is_multi_account: bool,
+) {
+    let short_id = email.split('@').next().unwrap_or(email);
+
+    // Prefer an existing weekly reset time from this account, or fallback to any known weekly reset
+    let existing_weekly_reset = combined
+        .windows
+        .iter()
+        .find(|w| w.account.as_deref() == Some(email) && w.kind == WindowKind::Weekly && w.resets_at.is_some())
+        .or_else(|| combined.windows.iter().find(|w| w.kind == WindowKind::Weekly && w.resets_at.is_some()))
+        .and_then(|w| w.resets_at);
+
+    let has_flash_weekly = combined.windows.iter().any(|w| {
+        w.account.as_deref() == Some(email)
+            && w.scope.as_deref().is_some_and(|s| s.contains("Flash") || s.contains("3.8"))
+            && w.kind == WindowKind::Weekly
+    });
+    let has_flash_5h = combined.windows.iter().any(|w| {
+        w.account.as_deref() == Some(email)
+            && w.scope.as_deref().is_some_and(|s| s.contains("Flash") || s.contains("3.8"))
+            && w.kind == WindowKind::Session
+    });
+    let has_argon = combined.windows.iter().any(|w| {
+        w.account.as_deref() == Some(email)
+            && w.scope.as_deref().is_some_and(|s| s.contains("Argon"))
+    });
+    let has_claude_weekly = combined.windows.iter().any(|w| {
+        w.account.as_deref() == Some(email)
+            && w.scope.as_deref().is_some_and(|s| s.contains("Claude"))
+            && w.kind == WindowKind::Weekly
+    });
+    let has_claude_5h = combined.windows.iter().any(|w| {
+        w.account.as_deref() == Some(email)
+            && w.scope.as_deref().is_some_and(|s| s.contains("Claude"))
+            && w.kind == WindowKind::Session
+    });
+
+    let fmt_scope = |base: &str| -> String {
+        if is_multi_account {
+            format!("{base} ({short_id})")
+        } else {
+            base.to_string()
+        }
+    };
+
+    if !has_flash_5h {
+        let mut w = QuotaWindow::new(format!("{short_id}_gemini-5h"), Some(300), 0.0)
+            .kind(WindowKind::Session)
+            .scope(fmt_scope("Gemini 3.8 Flash"));
+        w.account = Some(email.to_string());
+        combined.windows.push(w);
+    }
+    if !has_flash_weekly {
+        let mut w = QuotaWindow::new(format!("{short_id}_gemini-weekly"), Some(10080), 0.0)
+            .kind(WindowKind::Weekly)
+            .resets_at(existing_weekly_reset)
+            .scope(fmt_scope("Gemini 3.8 Flash"));
+        w.account = Some(email.to_string());
+        combined.windows.push(w);
+    }
+    if !has_argon {
+        let mut w = QuotaWindow::new(format!("{short_id}_gemini-argon-wtu-weekly"), Some(10080), 0.0)
+            .kind(WindowKind::Weekly)
+            .resets_at(existing_weekly_reset)
+            .scope(fmt_scope("Argon 4"));
+        w.account = Some(email.to_string());
+        combined.windows.push(w);
+    }
+    if !has_claude_5h {
+        let mut w = QuotaWindow::new(format!("{short_id}_3p-5h"), Some(300), 0.0)
+            .kind(WindowKind::Session)
+            .scope(fmt_scope("Claude & GPT"));
+        w.account = Some(email.to_string());
+        combined.windows.push(w);
+    }
+    if !has_claude_weekly {
+        let mut w = QuotaWindow::new(format!("{short_id}_3p-weekly"), Some(10080), 0.0)
+            .kind(WindowKind::Weekly)
+            .resets_at(existing_weekly_reset)
+            .scope(fmt_scope("Claude & GPT"));
+        w.account = Some(email.to_string());
+        combined.windows.push(w);
+    }
+}
+
 async fn get_ls_account_email(ctx: &Ctx, ls_addr: &str, csrf: &str) -> Option<String> {
+    // 1. Try GetUserStatus (direct email in userStatus.email)
+    let url_status = format!("http://{ls_addr}/exa.language_server_pb.LanguageServerService/GetUserStatus");
+    if let Ok(resp) = ctx
+        .http
+        .post(&url_status)
+        .header("Content-Type", "application/json")
+        .header("Connect-Protocol-Version", "1")
+        .header("x-codeium-csrf-token", csrf)
+        .body("{}")
+        .send()
+        .await
+    {
+        if resp.status().is_success() {
+            if let Ok(body) = resp.json::<Value>().await {
+                if let Some(email) = body
+                    .get("userStatus")
+                    .and_then(|u| u.get("email"))
+                    .and_then(|e| e.as_str())
+                {
+                    if !email.is_empty() {
+                        return Some(email.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Fallback on GetLoadCodeAssist
     let url = format!("http://{ls_addr}/exa.language_server_pb.LanguageServerService/GetLoadCodeAssist");
     let resp = ctx
         .http

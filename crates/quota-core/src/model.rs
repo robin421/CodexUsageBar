@@ -320,9 +320,27 @@ impl Snapshot {
 
     /// The bottleneck window for a specific account.
     pub fn tightest_for_account(&self, account: &str) -> Option<&QuotaWindow> {
+        let short = account.split('@').next().unwrap_or(account);
         self.windows
             .iter()
-            .filter(|w| w.account.as_deref() == Some(account) || w.scope.as_deref().is_some_and(|s| s.contains(account)))
+            .filter(|w| {
+                w.account.as_deref().is_some_and(|a| a == account || a.split('@').next() == Some(short))
+                    || w.scope.as_deref().is_some_and(|s| s.contains(short))
+            })
+            .min_by(|a, b| a.remaining_percent().total_cmp(&b.remaining_percent()))
+    }
+
+    /// The bottleneck window for a specific account and scope keyword.
+    pub fn tightest_for_account_and_scope(&self, account: &str, keyword: &str) -> Option<&QuotaWindow> {
+        let short = account.split('@').next().unwrap_or(account);
+        self.windows
+            .iter()
+            .filter(|w| {
+                let matches_acc = w.account.as_deref().is_some_and(|a| a == account || a.split('@').next() == Some(short))
+                    || w.scope.as_deref().is_some_and(|s| s.contains(short));
+                let matches_kw = keyword.is_empty() || w.scope.as_deref().is_some_and(|s| s.contains(keyword));
+                matches_acc && matches_kw
+            })
             .min_by(|a, b| a.remaining_percent().total_cmp(&b.remaining_percent()))
     }
 }

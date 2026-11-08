@@ -11,8 +11,10 @@
     lang,
     now,
     selectedFilter = "all",
+    selectedAccount = null,
     activeAgyAccount = null,
     onSelectFilter,
+    onSelectAccount,
     onSwitchAccount,
   }: {
     overview: Overview;
@@ -21,8 +23,10 @@
     lang: Lang;
     now: number;
     selectedFilter?: string;
+    selectedAccount?: string | null;
     activeAgyAccount?: string | null;
     onSelectFilter?: (id: string) => void;
+    onSelectAccount?: (email: string) => void;
     onSwitchAccount?: (email: string) => void;
   } = $props();
 
@@ -30,6 +34,13 @@
   function bottleneck(windows: QuotaWindow[]): QuotaWindow | null {
     if (!windows || windows.length === 0) return null;
     return windows.reduce((min, cur) => remaining(cur) < remaining(min) ? cur : min);
+  }
+
+  function cleanScope(scope: string | null | undefined, acc: string | null): string {
+    if (!scope) return "";
+    if (!acc) return scope;
+    const short = acc.split("@")[0];
+    return scope.replace(` (${short})`, "").trim();
   }
 
   const agyReport = $derived(reports.find((r) => r.id === "agy"));
@@ -50,16 +61,29 @@
     return Array.from(accs);
   });
 
-  // Distinct Antigravity models/scopes
+  // Current active/selected account
+  const currentAccount = $derived(
+    (selectedFilter.startsWith("account:") ? selectedFilter.replace("account:", "").split("#")[0] : null) ||
+    selectedAccount ||
+    (activeAgyAccount && agyAccounts.includes(activeAgyAccount) ? activeAgyAccount : null) ||
+    agyAccounts[0] ||
+    null
+  );
+
+  // Distinct Antigravity models/scopes for CURRENT selected account
   const agyModels = $derived.by(() => {
     const models = [
       { id: "gemini-flash", name: "Gemini 3.8 Flash", keyword: "3.8 Flash", icon: "⚡" },
       { id: "argon-4", name: "Argon 4", keyword: "Argon", icon: "🧪" },
       { id: "claude-gpt", name: "Claude & GPT", keyword: "Claude", icon: "🧠" },
     ];
+    const accountWindows = currentAccount
+      ? agyWindows.filter((w) => w.account === currentAccount || w.scope?.includes(currentAccount.split("@")[0]))
+      : agyWindows;
+
     return models
       .map((m) => {
-        const matching = agyWindows.filter((w) => w.scope?.includes(m.keyword));
+        const matching = accountWindows.filter((w) => w.scope?.includes(m.keyword));
         const win = bottleneck(matching);
         if (!win) return null;
         const rem = remaining(win);
@@ -95,11 +119,17 @@
 
   // Selected state derivation
   const current = $derived.by(() => {
-    // 1. Antigravity model filter (e.g. gemini-flash, argon-4, claude-gpt)
-    const model = agyModels.find((m) => m.id === selectedFilter);
+    // 1. Antigravity model filter (e.g. gemini-flash, argon-4, claude-gpt, or account:xxx#model)
+    let activeModelId = agyModels.find((m) => m.id === selectedFilter)?.id;
+    if (!activeModelId && selectedFilter.includes("#")) {
+      const modelPart = selectedFilter.split("#")[1];
+      activeModelId = agyModels.find((m) => m.id === modelPart)?.id;
+    }
+    const model = agyModels.find((m) => m.id === activeModelId);
     if (model && agyReport) {
+      const shortName = currentAccount ? currentAccount.split("@")[0] : null;
       return {
-        title: model.name,
+        title: shortName ? `${model.name} (${shortName})` : model.name,
         caption: lang === "zh" ? `${model.name} 额度` : `${model.name} Quota`,
         window: model.window,
         provider: agyReport,
@@ -110,7 +140,7 @@
 
     // 2. Account filter (e.g. account:togxida@gmail.com)
     if (selectedFilter.startsWith("account:") && agyReport) {
-      const email = selectedFilter.replace("account:", "");
+      const email = selectedFilter.replace("account:", "").split("#")[0];
       const matching = agyWindows.filter((w) => w.account === email || w.scope?.includes(email.split("@")[0]));
       const win = bottleneck(matching);
       if (win) {
@@ -118,7 +148,7 @@
         const shortName = email.split("@")[0];
         return {
           title: `Antigravity (${shortName})`,
-          caption: lang === "zh" ? `${email} 额度` : `${email} Quota`,
+          caption: lang === "zh" ? `${shortName} 额度` : `${shortName} Quota`,
           window: win,
           provider: agyReport,
           remaining: rem,
@@ -130,7 +160,15 @@
     // 3. Provider filter (e.g. codex, grok, agy)
     const provider = reports.find((r) => r.id === selectedFilter);
     if (provider && provider.snapshot && provider.snapshot.windows.length > 0) {
-      const win = bottleneck(provider.snapshot.windows);
+      let win: QuotaWindow | null = null;
+      if (provider.id === "agy" && currentAccount) {
+        const matching = provider.snapshot.windows.filter(
+          (w) => w.account === currentAccount || w.scope?.includes(currentAccount.split("@")[0])
+        );
+        win = bottleneck(matching) || bottleneck(provider.snapshot.windows);
+      } else {
+        win = bottleneck(provider.snapshot.windows);
+      }
       if (win) {
         const rem = remaining(win);
         return {
@@ -163,12 +201,36 @@
   const showAgySubbar = $derived(
     selectedFilter === "agy" ||
     agyModels.some((m) => m.id === selectedFilter) ||
-    selectedFilter.startsWith("account:")
+    selectedFilter.startsWith("account:") ||
+    (agyAccounts.length > 1 && (selectedFilter === "all" || !selectedFilter))
   );
 
   function select(id: string) {
     if (!onSelectFilter) return;
     onSelectFilter(id);
+  }
+
+  function selectAccount(acc: string) {
+    if (onSelectAccount) onSelectAccount(acc);
+    if (onSelectFilter) onSelectFilter(`account:${acc}`);
+  }
+
+  function selectModel(modelId: string) {
+    if (!onSelectFilter) return;
+    const isCurModelActive = selectedFilter === modelId || selectedFilter === `account:${currentAccount}#${modelId}`;
+    if (isCurModelActive) {
+      if (currentAccount) {
+        selectAccount(currentAccount);
+      } else {
+        onSelectFilter("agy");
+      }
+      return;
+    }
+    if (currentAccount) {
+      onSelectFilter(`account:${currentAccount}#${modelId}`);
+    } else {
+      onSelectFilter(modelId);
+    }
   }
 </script>
 
@@ -186,9 +248,9 @@
         <h2>{current.title}</h2>
         <p class="window">
           {windowName(w, lang)}
-          {#if w.scope}<span class="scope">{w.scope}</span>{/if}
+          {#if w.scope}<span class="scope">{cleanScope(w.scope, currentAccount)}</span>{/if}
         </p>
-        <p class="when">{countdown(w.resets_at, now, lang)}</p>
+        <p class="when">{countdown(w.resets_at, now, lang, current.remaining)}</p>
         {#if w.resets_at}<p class="clock">{resetClock(w.resets_at, now, lang)}</p>{/if}
       </div>
     </div>
@@ -227,26 +289,25 @@
             <span class="group-label">{lang === "zh" ? "账号" : "Account"}:</span>
             {#each agyAccounts as acc (acc)}
               {@const isCurActive = activeAgyAccount === acc}
-              {@const isSelected = selectedFilter === `account:${acc}`}
+              {@const isSelected = currentAccount === acc}
               <button
                 type="button"
                 class="account-chip"
                 class:active={isSelected}
                 class:is-active-cli={isCurActive}
-                onclick={() => select(`account:${acc}`)}
+                onclick={() => selectAccount(acc)}
                 title="{acc} {isCurActive ? (lang === 'zh' ? '(当前CLI活动账号)' : '(Current CLI active)') : ''}"
               >
                 <span class="acc-name">{acc.split('@')[0]}</span>
                 {#if isCurActive}<span class="active-badge" title={lang === 'zh' ? '当前CLI账号' : 'Active CLI account'}>CLI</span>{/if}
               </button>
             {/each}
-            {#if onSwitchAccount && selectedFilter.startsWith("account:")}
-              {@const selEmail = selectedFilter.replace("account:", "")}
-              {#if activeAgyAccount !== selEmail}
+            {#if onSwitchAccount && currentAccount}
+              {#if activeAgyAccount !== currentAccount}
                 <button
                   type="button"
                   class="btn-switch-cli"
-                  onclick={() => onSwitchAccount(selEmail)}
+                  onclick={() => onSwitchAccount(currentAccount)}
                   title={lang === "zh" ? "将此账号设为 Antigravity CLI 活跃账号" : "Set as active Antigravity CLI account"}
                 >
                   {lang === "zh" ? "设为活动账号" : "Set as Active"}
@@ -259,12 +320,13 @@
         {#if agyModels.length > 0}
           <div class="model-group">
             {#each agyModels as m (m.id)}
+              {@const isSelected = selectedFilter === m.id || selectedFilter === `account:${currentAccount}#${m.id}`}
               <button
                 type="button"
                 class="model-chip"
-                class:active={selectedFilter === m.id}
+                class:active={isSelected}
                 data-level={m.level}
-                onclick={() => select(m.id)}
+                onclick={() => selectModel(m.id)}
               >
                 <span class="m-icon">{m.icon}</span>
                 <span class="m-name">{m.name}</span>

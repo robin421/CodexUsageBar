@@ -7,10 +7,58 @@
   import { api } from "../lib/api";
   import type { Issue, Lang, ProviderReport, Thresholds } from "../lib/types";
 
-  let { report, thresholds, lang, now, onRetry }: { report: ProviderReport; thresholds: Thresholds; lang: Lang; now: number; onRetry: () => void } = $props();
+  let {
+    report,
+    thresholds,
+    lang,
+    now,
+    selectedAccount = null,
+    selectedFilter = "all",
+    onRetry,
+  }: {
+    report: ProviderReport;
+    thresholds: Thresholds;
+    lang: Lang;
+    now: number;
+    selectedAccount?: string | null;
+    selectedFilter?: string;
+    onRetry: () => void;
+  } = $props();
 
   const snap = $derived(report.snapshot);
   let copied = $state(false);
+
+  const displayWindows = $derived.by(() => {
+    if (!snap) return [];
+    let list = snap.windows;
+    if (report.id === "agy" && selectedAccount && selectedAccount !== "all") {
+      const short = selectedAccount.split("@")[0];
+      list = list.filter((w) => w.account === selectedAccount || w.scope?.includes(short));
+    }
+    // If a specific model is selected, filter to that model
+    let modelKeyword: string | null = null;
+    if (selectedFilter.includes("#")) {
+      const modelPart = selectedFilter.split("#")[1];
+      if (modelPart.includes("flash") || modelPart.includes("3.8")) modelKeyword = "3.8 Flash";
+      else if (modelPart.includes("argon")) modelKeyword = "Argon";
+      else if (modelPart.includes("claude") || modelPart.includes("gpt")) modelKeyword = "Claude";
+    } else if (["gemini-flash", "argon-4", "claude-gpt"].includes(selectedFilter)) {
+      if (selectedFilter === "gemini-flash") modelKeyword = "3.8 Flash";
+      else if (selectedFilter === "argon-4") modelKeyword = "Argon";
+      else if (selectedFilter === "claude-gpt") modelKeyword = "Claude";
+    }
+    if (modelKeyword) {
+      list = list.filter((w) => w.scope?.includes(modelKeyword!));
+    }
+    return list;
+  });
+
+  function cleanScope(scope: string | null | undefined, acc: string | null): string {
+    if (!scope) return "";
+    if (!acc) return scope;
+    const short = acc.split("@")[0];
+    return scope.replace(` (${short})`, "").trim();
+  }
 
   async function copy(cmd: string) {
     await api.copy(cmd);
@@ -51,7 +99,11 @@
         {report.name}
         {#if report.beta}<span class="beta">{$t("beta")}</span>{/if}
       </h3>
-      {#if snap?.account}<span class="account" title={snap.account}>{snap.account}</span>{/if}
+      {#if report.id === "agy" && selectedAccount}
+        <span class="account" title={selectedAccount}>{selectedAccount}</span>
+      {:else if snap?.account}
+        <span class="account" title={snap.account}>{snap.account}</span>
+      {/if}
     </div>
     {#if snap?.plan}<span class="plan">{snap.plan}</span>{/if}
   </header>
@@ -64,27 +116,28 @@
   {/if}
 
   {#if snap}
-    {#if snap.windows.length === 0 && snap.balances.length === 0}
+    {#if displayWindows.length === 0 && snap.balances.length === 0}
       <p class="muted">{$t("noWindows")}</p>
     {/if}
-    {#each snap.windows as w (w.id)}
+    {#each displayWindows as w (w.id)}
       {@const rem = remaining(w)}
       {@const level = levelOf(w, thresholds)}
       {@const expected = expectedRemaining(w, now)}
       {@const ahead = expected != null && rem / 100 < expected - 0.1}
       {@const amt = amounts(w, lang)}
+      {@const cleanedScope = cleanScope(w.scope, report.id === "agy" ? selectedAccount : null)}
       <div class="window" data-level={level}>
         <div class="row">
           <span class="name">
             {windowName(w, lang)}
-            {#if w.scope}<span class="scope">{w.scope}</span>{/if}
+            {#if cleanedScope}<span class="scope">{cleanedScope}</span>{/if}
           </span>
           {#if ahead}<span class="pace">{$t("aheadOfPace")}</span>{/if}
           <span class="pct">{Math.round(rem)}%</span>
         </div>
-        <Meter remaining={rem} {level} {expected} label="{windowName(w, lang)} {w.scope ?? ''}" />
+        <Meter remaining={rem} {level} {expected} label="{windowName(w, lang)} {cleanedScope}" />
         <div class="row sub">
-          <span class="when">{countdown(w.resets_at, now, lang)}</span>
+          <span class="when">{countdown(w.resets_at, now, lang, rem)}</span>
           <span class="right">{amt ?? resetClock(w.resets_at, now, lang)}</span>
         </div>
       </div>

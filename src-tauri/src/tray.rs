@@ -120,29 +120,51 @@ fn target_for_filter<'a>(
     // 2. Antigravity model / scope match (e.g. "gemini-flash", "argon-4", "model:Gemini 3.8 Flash", etc.)
     if let Some(agy) = snap.reports.iter().find(|r| r.id == quota_core::ProviderId::Agy) {
         if let Some(s) = agy.snapshot.as_ref() {
-            let (keyword, display_name) = if filter.contains("flash") || filter.contains("3.8") {
-                ("3.8 Flash", "Flash")
-            } else if filter.contains("argon") {
-                ("Argon", "Argon 4")
-            } else if filter.contains("claude") || filter.contains("gpt") {
-                ("Claude", "Claude")
-            } else if let Some(stripped) = filter.strip_prefix("account:") {
-                let short = stripped.split('@').next().unwrap_or(stripped);
-                let w = s.tightest_for_account(stripped);
+            if let Some(stripped) = filter.strip_prefix("account:") {
+                let (acc, model_part) = match stripped.split_once('#') {
+                    Some((a, m)) => (a, Some(m)),
+                    None => (stripped, None),
+                };
+                let short = acc.split('@').next().unwrap_or(acc);
+                let kw = match model_part {
+                    Some(m) if m.contains("flash") || m.contains("3.8") => Some("3.8 Flash"),
+                    Some(m) if m.contains("argon") => Some("Argon"),
+                    Some(m) if m.contains("claude") || m.contains("gpt") => Some("Claude"),
+                    _ => None,
+                };
+                let w = if let Some(k) = kw {
+                    s.tightest_for_account_and_scope(acc, k)
+                } else {
+                    s.tightest_for_account(acc)
+                };
                 return (
                     Some(short),
                     w,
                     w.map(|win| win.level(t)),
                     w.map(|win| win.remaining_percent()),
                 );
+            }
+
+            let (keyword, display_name) = if filter.contains("flash") || filter.contains("3.8") {
+                ("3.8 Flash", "Flash")
+            } else if filter.contains("argon") {
+                ("Argon", "Argon 4")
+            } else if filter.contains("claude") || filter.contains("gpt") {
+                ("Claude", "Claude")
             } else if let Some(stripped) = filter.strip_prefix("model:") {
                 (stripped, stripped)
             } else {
                 ("", "Antigravity")
             };
 
-            if let Some(w) = s.tightest_for_scope(keyword) {
-                return (Some(display_name), Some(w), Some(w.level(t)), Some(w.remaining_percent()));
+            let w = if let Some(act) = &snap.active_agy_account {
+                s.tightest_for_account_and_scope(act, keyword).or_else(|| s.tightest_for_scope(keyword))
+            } else {
+                s.tightest_for_scope(keyword)
+            };
+
+            if let Some(win) = w {
+                return (Some(display_name), Some(win), Some(win.level(t)), Some(win.remaining_percent()));
             }
         }
     }
