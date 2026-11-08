@@ -15,6 +15,31 @@ fn get_snapshot(state: tauri::State<AppState>) -> AppSnapshot {
 }
 
 #[tauri::command]
+fn set_active_filter(app: AppHandle, filter: String) -> AppSnapshot {
+    let state = app.state::<AppState>();
+    {
+        let mut f = state.active_filter.lock().unwrap();
+        *f = filter;
+    }
+    state::emit(&app);
+    state.snapshot()
+}
+
+#[tauri::command]
+async fn switch_agy_account(app: AppHandle, email: String) -> AppSnapshot {
+    if let Some(home) = dirs::home_dir() {
+        let path = home.join(".gemini/google_accounts.json");
+        let payload = serde_json::json!({
+            "active": email,
+            "old": []
+        });
+        let _ = std::fs::write(path, serde_json::to_string_pretty(&payload).unwrap_or_default());
+    }
+    state::refresh(app.clone()).await;
+    app.state::<AppState>().snapshot()
+}
+
+#[tauri::command]
 async fn refresh(app: AppHandle) -> AppSnapshot {
     state::refresh(app.clone()).await;
     app.state::<AppState>().snapshot()
@@ -135,6 +160,8 @@ pub fn run() {
         .manage(AppState::new())
         .invoke_handler(tauri::generate_handler![
             get_snapshot,
+            set_active_filter,
+            switch_agy_account,
             refresh,
             update_settings,
             set_api_key,

@@ -2,7 +2,7 @@
   import Gauge from "./Gauge.svelte";
   import { countdown, levelOf, remaining, resetClock, windowName } from "../lib/format";
   import { t } from "../lib/i18n";
-  import type { Lang, Overview, ProviderReport, Thresholds } from "../lib/types";
+  import type { Lang, Overview, ProviderReport, QuotaWindow, Thresholds } from "../lib/types";
 
   let {
     overview,
@@ -11,7 +11,9 @@
     lang,
     now,
     selectedFilter = "all",
+    activeAgyAccount = null,
     onSelectFilter,
+    onSwitchAccount,
   }: {
     overview: Overview;
     reports: ProviderReport[];
@@ -19,78 +21,158 @@
     lang: Lang;
     now: number;
     selectedFilter?: string;
+    activeAgyAccount?: string | null;
     onSelectFilter?: (id: string) => void;
+    onSwitchAccount?: (email: string) => void;
   } = $props();
 
-  // Selected tool report if filter is not "all"
-  const selectedReport = $derived(
-    selectedFilter !== "all" ? reports.find((r) => r.id === selectedFilter) : null
-  );
+  // Bottleneck window helper (strictly minimum remaining percentage)
+  function bottleneck(windows: QuotaWindow[]): QuotaWindow | null {
+    if (!windows || windows.length === 0) return null;
+    return windows.reduce((min, cur) => remaining(cur) < remaining(min) ? cur : min);
+  }
 
-  // Derive target window, provider, remaining, and level based on filter
+  const agyReport = $derived(reports.find((r) => r.id === "agy"));
+  const agyWindows = $derived(agyReport?.snapshot?.windows ?? []);
+
+  // Distinct Antigravity accounts
+  const agyAccounts = $derived.by(() => {
+    const accs = new Set<string>();
+    for (const w of agyWindows) {
+      if (w.account) accs.add(w.account);
+    }
+    if (accs.size === 0 && agyReport?.snapshot?.account) {
+      for (const a of agyReport.snapshot.account.split(",")) {
+        const trimmed = a.trim();
+        if (trimmed) accs.add(trimmed);
+      }
+    }
+    return Array.from(accs);
+  });
+
+  // Distinct Antigravity models/scopes
+  const agyModels = $derived.by(() => {
+    const models = [
+      { id: "gemini-flash", name: "Gemini 3.8 Flash", keyword: "3.8 Flash", icon: "⚡" },
+      { id: "argon-4", name: "Argon 4", keyword: "Argon", icon: "🧪" },
+      { id: "claude-gpt", name: "Claude & GPT", keyword: "Claude", icon: "🧠" },
+    ];
+    return models
+      .map((m) => {
+        const matching = agyWindows.filter((w) => w.scope?.includes(m.keyword));
+        const win = bottleneck(matching);
+        if (!win) return null;
+        const rem = remaining(win);
+        return {
+          id: m.id,
+          name: m.name,
+          icon: m.icon,
+          pct: Math.round(rem),
+          level: levelOf(win, thresholds),
+          window: win,
+        };
+      })
+      .filter((m): m is NonNullable<typeof m> => m !== null);
+  });
+
+  // Top level active tools summary
+  const activeTools = $derived.by(() => {
+    return reports
+      .filter((r) => r.snapshot && r.snapshot.windows.length > 0)
+      .map((r) => {
+        const win = bottleneck(r.snapshot!.windows);
+        const rem = win ? remaining(win) : 0;
+        const lvl = win ? levelOf(win, thresholds) : "normal";
+        return {
+          id: r.id,
+          name: r.name,
+          pct: Math.round(rem),
+          level: lvl,
+          window: win,
+        };
+      });
+  });
+
+  // Selected state derivation
   const current = $derived.by(() => {
-    if (selectedReport && selectedReport.snapshot && selectedReport.snapshot.windows.length > 0) {
-      const snap = selectedReport.snapshot;
-      const usable = snap.windows.filter((win) => remaining(win) > 0);
-      const win = usable.length > 0
-        ? usable.reduce((min, cur) => remaining(cur) < remaining(min) ? cur : min)
-        : snap.windows.reduce((min, cur) => remaining(cur) < remaining(min) ? cur : min);
-      const rem = remaining(win);
-      const lvl = levelOf(win, thresholds);
+    // 1. Antigravity model filter (e.g. gemini-flash, argon-4, claude-gpt)
+    const model = agyModels.find((m) => m.id === selectedFilter);
+    if (model && agyReport) {
       return {
-        window: win,
-        provider: selectedReport,
-        remaining: rem,
-        level: lvl,
+        title: model.name,
+        caption: lang === "zh" ? `${model.name} 额度` : `${model.name} Quota`,
+        window: model.window,
+        provider: agyReport,
+        remaining: model.pct,
+        level: model.level,
       };
     }
 
+    // 2. Account filter (e.g. account:togxida@gmail.com)
+    if (selectedFilter.startsWith("account:") && agyReport) {
+      const email = selectedFilter.replace("account:", "");
+      const matching = agyWindows.filter((w) => w.account === email || w.scope?.includes(email.split("@")[0]));
+      const win = bottleneck(matching);
+      if (win) {
+        const rem = remaining(win);
+        const shortName = email.split("@")[0];
+        return {
+          title: `Antigravity (${shortName})`,
+          caption: lang === "zh" ? `${email} 额度` : `${email} Quota`,
+          window: win,
+          provider: agyReport,
+          remaining: rem,
+          level: levelOf(win, thresholds),
+        };
+      }
+    }
+
+    // 3. Provider filter (e.g. codex, grok, agy)
+    const provider = reports.find((r) => r.id === selectedFilter);
+    if (provider && provider.snapshot && provider.snapshot.windows.length > 0) {
+      const win = bottleneck(provider.snapshot.windows);
+      if (win) {
+        const rem = remaining(win);
+        return {
+          title: provider.name,
+          caption: lang === "zh" ? `${provider.name} 额度` : `${provider.name} Quota`,
+          window: win,
+          provider: provider,
+          remaining: rem,
+          level: levelOf(win, thresholds),
+        };
+      }
+    }
+
+    // 4. "all" or default overview
     const w = overview.tightest_window;
-    const provider = reports.find((r) => r.id === overview.tightest_provider);
+    const bestProvider = reports.find((r) => r.id === overview.tightest_provider);
     return {
+      title: bestProvider?.name ?? (lang === "zh" ? "总体额度" : "Overview"),
+      caption: overview.level === "normal"
+        ? (lang === "zh" ? "当前可用额度" : "Available Headroom")
+        : (lang === "zh" ? "余量最低" : "Lowest Headroom"),
       window: w,
-      provider: provider,
+      provider: bestProvider,
       remaining: overview.min_remaining,
       level: overview.level,
     };
   });
 
   const w = $derived(current.window);
-  const provider = $derived(current.provider);
+  const showAgySubbar = $derived(
+    selectedFilter === "agy" ||
+    agyModels.some((m) => m.id === selectedFilter) ||
+    selectedFilter.startsWith("account:")
+  );
 
-  // Clean summary of active tools
-  const activeTools = $derived.by(() => {
-    return reports
-      .filter((r) => r.snapshot && r.snapshot.windows.length > 0)
-      .map((r) => {
-        const snap = r.snapshot!;
-        const usable = snap.windows.filter((win) => remaining(win) > 0);
-        const win = usable.length > 0
-          ? usable.reduce((min, cur) => remaining(cur) < remaining(min) ? cur : min)
-          : snap.windows.reduce((min, cur) => remaining(cur) < remaining(min) ? cur : min);
-        const rem = remaining(win);
-        const lvl = levelOf(win, thresholds);
-        return {
-          id: r.id,
-          name: r.name,
-          pct: Math.round(rem),
-          level: lvl,
-          scope: win.scope,
-        };
-      });
-  });
-
-  function toggleFilter(id: string) {
+  function select(id: string) {
     if (!onSelectFilter) return;
-    if (selectedFilter === id) {
-      onSelectFilter("all");
-    } else {
-      onSelectFilter(id);
-    }
+    onSelectFilter(id);
   }
 </script>
 
-{#if w && provider}
+{#if w}
   <section class="hero" data-level={current.level} aria-label={$t("lowestLabel")}>
     <div class="lead">
       <Gauge remaining={current.remaining} level={current.level}>
@@ -100,16 +182,8 @@
         </div>
       </Gauge>
       <div class="detail">
-        <span class="caption">
-          {#if selectedFilter !== "all"}
-            {provider.name} {lang === "zh" ? "额度" : "Quota"}
-          {:else if current.level === "normal"}
-            {lang === "zh" ? "当前可用额度" : "Available Headroom"}
-          {:else}
-            {$t("lowestLabel")}
-          {/if}
-        </span>
-        <h2>{provider.name}</h2>
+        <span class="caption">{current.caption}</span>
+        <h2>{current.title}</h2>
         <p class="window">
           {windowName(w, lang)}
           {#if w.scope}<span class="scope">{w.scope}</span>{/if}
@@ -119,13 +193,13 @@
       </div>
     </div>
 
-    {#if activeTools.length > 1}
+    {#if activeTools.length > 0}
       <div class="tool-strip">
         <button
           type="button"
           class="tool-chip"
           class:active={selectedFilter === "all"}
-          onclick={() => toggleFilter("all")}
+          onclick={() => select("all")}
         >
           <span class="tool-name">{lang === "zh" ? "全部" : "All"}</span>
         </button>
@@ -136,13 +210,69 @@
             class="tool-chip"
             class:active={selectedFilter === tool.id}
             data-level={tool.level}
-            onclick={() => toggleFilter(tool.id)}
+            onclick={() => select(tool.id)}
           >
             <span class="dot"></span>
             <span class="tool-name">{tool.name}</span>
             <span class="tool-pct">{tool.pct}%</span>
           </button>
         {/each}
+      </div>
+    {/if}
+
+    {#if showAgySubbar && (agyModels.length > 0 || agyAccounts.length > 1)}
+      <div class="sub-strip">
+        {#if agyAccounts.length > 1}
+          <div class="account-group">
+            <span class="group-label">{lang === "zh" ? "账号" : "Account"}:</span>
+            {#each agyAccounts as acc (acc)}
+              {@const isCurActive = activeAgyAccount === acc}
+              {@const isSelected = selectedFilter === `account:${acc}`}
+              <button
+                type="button"
+                class="account-chip"
+                class:active={isSelected}
+                class:is-active-cli={isCurActive}
+                onclick={() => select(`account:${acc}`)}
+                title="{acc} {isCurActive ? (lang === 'zh' ? '(当前CLI活动账号)' : '(Current CLI active)') : ''}"
+              >
+                <span class="acc-name">{acc.split('@')[0]}</span>
+                {#if isCurActive}<span class="active-badge" title={lang === 'zh' ? '当前CLI账号' : 'Active CLI account'}>CLI</span>{/if}
+              </button>
+            {/each}
+            {#if onSwitchAccount && selectedFilter.startsWith("account:")}
+              {@const selEmail = selectedFilter.replace("account:", "")}
+              {#if activeAgyAccount !== selEmail}
+                <button
+                  type="button"
+                  class="btn-switch-cli"
+                  onclick={() => onSwitchAccount(selEmail)}
+                  title={lang === "zh" ? "将此账号设为 Antigravity CLI 活跃账号" : "Set as active Antigravity CLI account"}
+                >
+                  {lang === "zh" ? "设为活动账号" : "Set as Active"}
+                </button>
+              {/if}
+            {/if}
+          </div>
+        {/if}
+
+        {#if agyModels.length > 0}
+          <div class="model-group">
+            {#each agyModels as m (m.id)}
+              <button
+                type="button"
+                class="model-chip"
+                class:active={selectedFilter === m.id}
+                data-level={m.level}
+                onclick={() => select(m.id)}
+              >
+                <span class="m-icon">{m.icon}</span>
+                <span class="m-name">{m.name}</span>
+                <span class="m-pct">{m.pct}%</span>
+              </button>
+            {/each}
+          </div>
+        {/if}
       </div>
     {/if}
   </section>
@@ -290,4 +420,108 @@
   .tool-chip[data-level="critical"] .tool-pct {
     color: var(--crit);
   }
+
+  .sub-strip {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--line);
+  }
+  .account-group, .model-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+  .group-label {
+    font-size: 11px;
+    color: var(--ink-3);
+    font-weight: 500;
+  }
+  .account-chip {
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    font-size: 11px;
+    font-family: inherit;
+    color: var(--ink-2);
+    transition: all 0.15s ease;
+  }
+  .account-chip:hover {
+    border-color: var(--ink-3);
+  }
+  .account-chip.active {
+    background: var(--inset);
+    border-color: var(--ink);
+    color: var(--ink);
+    font-weight: 600;
+  }
+  .active-badge {
+    font-size: 9px;
+    font-weight: 700;
+    background: var(--good);
+    color: white;
+    padding: 1px 4px;
+    border-radius: 6px;
+  }
+  .btn-switch-cli {
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: var(--surface);
+    border: 1px solid var(--good);
+    font-size: 10px;
+    color: var(--good);
+    font-weight: 600;
+    transition: all 0.15s;
+  }
+  .btn-switch-cli:hover {
+    background: var(--good);
+    color: white;
+  }
+
+  .model-chip {
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    font-size: 11px;
+    font-family: inherit;
+    color: var(--ink-2);
+    transition: all 0.15s ease;
+  }
+  .model-chip:hover {
+    border-color: var(--ink-3);
+  }
+  .model-chip.active {
+    background: var(--surface);
+    border-color: var(--ink);
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .m-icon {
+    font-size: 11px;
+  }
+  .m-pct {
+    font-weight: 600;
+  }
+  .model-chip[data-level="warning"] .m-pct { color: var(--warn); }
+  .model-chip[data-level="critical"] .m-pct { color: var(--crit); }
 </style>

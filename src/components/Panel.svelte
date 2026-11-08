@@ -24,11 +24,34 @@
   const firstLoad = $derived(snap.reports.length === 0 || (snap.overview.any_loading && visible.every((r) => !r.snapshot) && !snap.last_refresh));
 
   let selectedFilter = $state<string>("all");
-  const filteredOrdered = $derived(
-    selectedFilter === "all"
-      ? ordered
-      : ordered.filter((r) => r.id === selectedFilter)
-  );
+  $effect(() => {
+    if (snap.active_filter) {
+      selectedFilter = snap.active_filter;
+    }
+  });
+
+  const filteredOrdered = $derived.by(() => {
+    if (selectedFilter === "all") return ordered;
+    if (selectedFilter === "codex") return ordered.filter((r) => r.id === "codex");
+    if (selectedFilter === "grok") return ordered.filter((r) => r.id === "grok");
+    if (
+      selectedFilter === "agy" ||
+      selectedFilter.startsWith("account:") ||
+      ["gemini-flash", "argon-4", "claude-gpt"].includes(selectedFilter)
+    ) {
+      return ordered.filter((r) => r.id === "agy");
+    }
+    return ordered.filter((r) => r.id === selectedFilter);
+  });
+
+  function handleSelectFilter(id: string) {
+    selectedFilter = id;
+    api.setActiveFilter(id);
+  }
+
+  function handleSwitchAccount(email: string) {
+    api.switchAgyAccount(email);
+  }
 
   let body: HTMLElement | undefined = $state();
   $effect(() => {
@@ -89,7 +112,9 @@
           {lang}
           now={$now}
           {selectedFilter}
-          onSelectFilter={(id) => (selectedFilter = id)}
+          activeAgyAccount={snap.active_agy_account}
+          onSelectFilter={handleSelectFilter}
+          onSwitchAccount={handleSwitchAccount}
         />
       </div>
       <div class="list">

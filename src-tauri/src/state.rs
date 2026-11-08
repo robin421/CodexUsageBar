@@ -19,6 +19,7 @@ pub struct AppState {
     pub reports: Mutex<Vec<ProviderReport>>,
     pub last_refresh: Mutex<Option<DateTime<Utc>>>,
     pub refreshing: AtomicBool,
+    pub active_filter: Mutex<String>,
     tracker: Mutex<AlertTracker>,
     cache: SnapshotCache,
     ctx: tokio::sync::Mutex<Option<Ctx>>,
@@ -33,6 +34,15 @@ pub struct AppSnapshot {
     pub last_refresh: Option<DateTime<Utc>>,
     pub settings: SettingsView,
     pub platform: &'static str,
+    pub active_filter: String,
+    pub active_agy_account: Option<String>,
+}
+
+pub fn get_active_agy_account() -> Option<String> {
+    let path = dirs::home_dir()?.join(".gemini/google_accounts.json");
+    let content = std::fs::read_to_string(path).ok()?;
+    let v: serde_json::Value = serde_json::from_str(&content).ok()?;
+    v.get("active").and_then(|a| a.as_str()).map(ToString::to_string)
 }
 
 fn cache_dir() -> std::path::PathBuf {
@@ -59,6 +69,7 @@ impl AppState {
             reports: Mutex::new(reports),
             last_refresh: Mutex::new(None),
             refreshing: AtomicBool::new(false),
+            active_filter: Mutex::new("all".to_string()),
             tracker: Mutex::new(AlertTracker::load(cache_dir())),
             cache,
             ctx: tokio::sync::Mutex::new(None),
@@ -68,6 +79,7 @@ impl AppState {
     pub fn snapshot(&self) -> AppSnapshot {
         let settings = self.settings.lock().unwrap();
         let reports = self.reports.lock().unwrap().clone();
+        let active_filter = self.active_filter.lock().unwrap().clone();
         AppSnapshot {
             overview: Overview::from_reports(&reports, &settings.thresholds),
             reports,
@@ -75,6 +87,8 @@ impl AppState {
             last_refresh: *self.last_refresh.lock().unwrap(),
             settings: settings.view(),
             platform: std::env::consts::OS,
+            active_filter,
+            active_agy_account: get_active_agy_account(),
         }
     }
 

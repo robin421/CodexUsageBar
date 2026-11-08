@@ -12,6 +12,8 @@ async function invoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T
 
 export const api = {
   getSnapshot: () => invoke<AppSnapshot>("get_snapshot"),
+  setActiveFilter: (filter: string) => invoke<AppSnapshot>("set_active_filter", { filter }),
+  switchAgyAccount: (email: string) => invoke<AppSnapshot>("switch_agy_account", { email }),
   refresh: () => invoke<AppSnapshot>("refresh"),
   updateSettings: (patch: SettingsPatch) => invoke<AppSnapshot>("update_settings", { patch }),
   setApiKey: (provider: ProviderId, key: string | null) => invoke<AppSnapshot>("set_api_key", { provider, key }),

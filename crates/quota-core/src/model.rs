@@ -196,6 +196,8 @@ pub struct QuotaWindow {
     pub limit: Option<f64>,
     /// Unit of `used` / `limit` ("requests", "USD", "credits").
     pub unit: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account: Option<String>,
 }
 
 impl QuotaWindow {
@@ -210,6 +212,7 @@ impl QuotaWindow {
             used: None,
             limit: None,
             unit: None,
+            account: None,
         }
     }
 
@@ -220,6 +223,11 @@ impl QuotaWindow {
 
     pub fn scope(mut self, scope: impl Into<String>) -> Self {
         self.scope = Some(scope.into());
+        self
+    }
+
+    pub fn account(mut self, account: impl Into<String>) -> Self {
+        self.account = Some(account.into());
         self
     }
 
@@ -295,18 +303,26 @@ impl Snapshot {
         }
     }
 
-    /// The window with the least headroom left.
+    /// The window with the least headroom left (the bottleneck window).
     pub fn tightest(&self) -> Option<&QuotaWindow> {
         self.windows
             .iter()
             .min_by(|a, b| a.remaining_percent().total_cmp(&b.remaining_percent()))
     }
 
-    /// The window with the least headroom left among windows that still have remaining quota (> 0%).
-    pub fn tightest_usable(&self) -> Option<&QuotaWindow> {
+    /// The bottleneck window for a specific scope or model (e.g. "Gemini 3.8 Flash", "Argon 4").
+    pub fn tightest_for_scope(&self, keyword: &str) -> Option<&QuotaWindow> {
         self.windows
             .iter()
-            .filter(|w| w.remaining_percent() > 0.0)
+            .filter(|w| w.scope.as_deref().is_some_and(|s| s.contains(keyword)))
+            .min_by(|a, b| a.remaining_percent().total_cmp(&b.remaining_percent()))
+    }
+
+    /// The bottleneck window for a specific account.
+    pub fn tightest_for_account(&self, account: &str) -> Option<&QuotaWindow> {
+        self.windows
+            .iter()
+            .filter(|w| w.account.as_deref() == Some(account) || w.scope.as_deref().is_some_and(|s| s.contains(account)))
             .min_by(|a, b| a.remaining_percent().total_cmp(&b.remaining_percent()))
     }
 }
@@ -415,18 +431,13 @@ pub struct Overview {
 
 impl Overview {
     pub fn from_reports(reports: &[ProviderReport], t: &Thresholds) -> Self {
-        let mut best: Option<(ProviderId, &QuotaWindow)> = None;
         let mut has_issue = false;
         let mut any_loading = false;
         let mut active_count = 0;
 
-        // If ANY window across all visible providers has quota (> 0%), prioritize usable windows
-        // so that an exhausted secondary cap doesn't mask active, usable quota.
-        let has_usable = reports.iter().filter(|r| r.visible()).any(|r| {
-            r.snapshot
-                .as_ref()
-                .is_some_and(|s| s.windows.iter().any(|w| w.remaining_percent() > 0.0))
-        });
+        // Group into usable model/provider scopes and overall bottleneck windows
+        let mut usable_windows: Vec<(ProviderId, &QuotaWindow)> = Vec::new();
+        let mut all_bottlenecks: Vec<(ProviderId, &QuotaWindow)> = Vec::new();
 
         for r in reports.iter().filter(|r| r.visible()) {
             active_count += 1;
@@ -435,24 +446,46 @@ impl Overview {
                 Status::Loading => any_loading = true,
                 _ => {}
             }
-            let target_w = if has_usable {
-                r.snapshot.as_ref().and_then(|s| s.tightest_usable())
-            } else {
-                r.snapshot.as_ref().and_then(|s| s.tightest())
-            };
-            if let Some(w) = target_w {
-                if best.is_none_or(|(_, b)| w.remaining_percent() < b.remaining_percent()) {
-                    best = Some((r.id, w));
+
+            if let Some(s) = r.snapshot.as_ref() {
+                // If a snapshot has multiple distinct scopes (e.g. Antigravity with Gemini Flash, Argon 4, Claude):
+                // evaluate the bottleneck for each model/scope independently.
+                let scopes: std::collections::HashSet<_> = s.windows.iter().filter_map(|w| w.scope.as_deref()).collect();
+                if scopes.len() > 1 {
+                    for scope in scopes {
+                        if let Some(w) = s.windows.iter()
+                            .filter(|w| w.scope.as_deref() == Some(scope))
+                            .min_by(|a, b| a.remaining_percent().total_cmp(&b.remaining_percent()))
+                        {
+                            all_bottlenecks.push((r.id, w));
+                            if w.remaining_percent() > 0.0 {
+                                usable_windows.push((r.id, w));
+                            }
+                        }
+                    }
+                } else if let Some(w) = s.tightest() {
+                    all_bottlenecks.push((r.id, w));
+                    if w.remaining_percent() > 0.0 {
+                        usable_windows.push((r.id, w));
+                    }
                 }
             }
         }
+
+        let has_usable = !usable_windows.is_empty();
+        let best = if has_usable {
+            // Pick the tightest among usable windows
+            usable_windows.into_iter().min_by(|(_, a), (_, b)| a.remaining_percent().total_cmp(&b.remaining_percent()))
+        } else {
+            // Pick the tightest overall (which are 0% or empty)
+            all_bottlenecks.into_iter().min_by(|(_, a), (_, b)| a.remaining_percent().total_cmp(&b.remaining_percent()))
+        };
 
         let level = match best {
             Some((_, w)) => {
                 if has_usable {
                     let lvl = w.level(t);
-                    // As long as there is quota available, top bar should show Normal
-                    // (or Warning if tightest usable is low), NEVER Critical (red).
+                    // As long as there is quota available somewhere, top bar should show Normal (or Warning), never Critical (red).
                     if lvl == Level::Critical {
                         Some(Level::Warning)
                     } else {

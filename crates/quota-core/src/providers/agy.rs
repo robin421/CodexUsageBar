@@ -105,13 +105,14 @@ pub async fn fetch(ctx: &Ctx) -> Result<Snapshot> {
             accounts.first().map(|(e, _)| e.clone()).unwrap_or_else(|| "default".into())
         });
         let short_id = active_email.split('@').next().unwrap_or(&active_email).to_string();
-        account_names.push(active_email);
+        account_names.push(active_email.clone());
 
         if ls_s.plan.as_deref() == Some("Pro") {
             has_pro = true;
         }
 
         for mut w in ls_s.windows.drain(..) {
+            w.account = Some(active_email.clone());
             if is_multi_account {
                 let base = w.scope.clone().unwrap_or_else(|| "Default".into());
                 w.scope = Some(format!("{base} ({short_id})"));
@@ -133,6 +134,7 @@ pub async fn fetch(ctx: &Ctx) -> Result<Snapshot> {
             }
             let short_id = email.split('@').next().unwrap_or(email);
             for mut w in snap.windows.drain(..) {
+                w.account = Some(email.clone());
                 if is_multi_account {
                     let base = w.scope.clone().unwrap_or_else(|| "Default".into());
                     w.scope = Some(format!("{base} ({short_id})"));
@@ -319,6 +321,19 @@ fn load_all_accounts(ctx: &Ctx) -> Vec<(String, StoredToken)> {
         }
     }
 
+    // Put active account first if present
+    let active_json = ctx.home.join(".gemini/google_accounts.json");
+    if let Ok(content) = std::fs::read_to_string(&active_json) {
+        if let Ok(v) = serde_json::from_str::<Value>(&content) {
+            if let Some(active) = v.get("active").and_then(|a| a.as_str()) {
+                if let Some(idx) = accounts.iter().position(|(e, _)| e == active) {
+                    let active_acc = accounts.remove(idx);
+                    accounts.insert(0, active_acc);
+                }
+            }
+        }
+    }
+
     accounts
 }
 
@@ -427,9 +442,9 @@ pub fn parse_quota_summary(body: &Value) -> Result<Snapshot> {
     for group in groups {
         let group_name = group.get("displayName").and_then(|d| d.as_str()).unwrap_or("Antigravity");
         let scope = match group_name {
-            "Gemini Models" => "Gemini",
-            "Claude and GPT models" => "Claude & GPT",
-            "Gemini 4 Argon" => "Argon 4",
+            "Gemini Models" | "Gemini" => "Gemini 3.8 Flash",
+            "Claude and GPT models" | "Claude & GPT" => "Claude & GPT",
+            "Gemini 4 Argon" | "Argon" => "Argon 4",
             other => other,
         };
 
@@ -484,6 +499,15 @@ pub fn parse_quota_summary(body: &Value) -> Result<Snapshot> {
     snap.plan = Some(if has_pro_bucket { "Pro".into() } else { "Antigravity".into() });
 
     Ok(snap)
+}
+
+pub fn switch_active_account(ctx: &Ctx, email: &str) -> std::io::Result<()> {
+    let path = ctx.home.join(".gemini/google_accounts.json");
+    let payload = serde_json::json!({
+        "active": email,
+        "old": []
+    });
+    std::fs::write(path, serde_json::to_string_pretty(&payload)?)
 }
 
 #[cfg(test)]
@@ -547,7 +571,7 @@ mod tests {
         let g_5h = s.windows.iter().find(|w| w.id == "gemini-5h").unwrap();
         assert!((g_5h.remaining_percent() - 77.70).abs() < 0.1);
         assert_eq!(g_5h.kind, WindowKind::Session);
-        assert_eq!(g_5h.scope.as_deref(), Some("Gemini"));
+        assert_eq!(g_5h.scope.as_deref(), Some("Gemini 3.8 Flash"));
 
         let p_weekly = s.windows.iter().find(|w| w.id == "3p-weekly").unwrap();
         assert_eq!(p_weekly.remaining_percent(), 0.0);

@@ -19,6 +19,7 @@ export interface QuotaWindow {
   used: number | null;
   limit: number | null;
   unit: string | null;
+  account?: string | null;
 }
 
 export interface Balance {
@@ -99,6 +100,8 @@ export interface AppSnapshot {
   last_refresh: string | null;
   settings: SettingsView;
   platform: string;
+  active_filter?: string;
+  active_agy_account?: string | null;
 }
 
 export type SettingsPatch = Partial<

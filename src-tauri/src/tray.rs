@@ -93,12 +93,77 @@ fn build_menu(app: &AppHandle, snap: Option<&AppSnapshot>, lang: Lang) -> tauri:
     Ok(menu)
 }
 
+fn target_for_filter<'a>(
+    snap: &'a AppSnapshot,
+    filter: &'a str,
+) -> (Option<&'a str>, Option<&'a quota_core::QuotaWindow>, Option<Level>, Option<f64>) {
+    let t = &snap.settings.thresholds;
+    if filter == "all" {
+        return (
+            None,
+            snap.overview.tightest_window.as_ref(),
+            snap.overview.level,
+            snap.overview.min_remaining,
+        );
+    }
+
+    // 1. Direct provider match by slug
+    if let Some(r) = snap.reports.iter().find(|r| r.id.slug() == filter) {
+        if let Some(s) = r.snapshot.as_ref() {
+            if let Some(w) = s.tightest() {
+                return (Some(r.name.as_str()), Some(w), Some(w.level(t)), Some(w.remaining_percent()));
+            }
+        }
+        return (Some(r.name.as_str()), None, None, None);
+    }
+
+    // 2. Antigravity model / scope match (e.g. "gemini-flash", "argon-4", "model:Gemini 3.8 Flash", etc.)
+    if let Some(agy) = snap.reports.iter().find(|r| r.id == quota_core::ProviderId::Agy) {
+        if let Some(s) = agy.snapshot.as_ref() {
+            let (keyword, display_name) = if filter.contains("flash") || filter.contains("3.8") {
+                ("3.8 Flash", "Flash")
+            } else if filter.contains("argon") {
+                ("Argon", "Argon 4")
+            } else if filter.contains("claude") || filter.contains("gpt") {
+                ("Claude", "Claude")
+            } else if let Some(stripped) = filter.strip_prefix("account:") {
+                let short = stripped.split('@').next().unwrap_or(stripped);
+                let w = s.tightest_for_account(stripped);
+                return (
+                    Some(short),
+                    w,
+                    w.map(|win| win.level(t)),
+                    w.map(|win| win.remaining_percent()),
+                );
+            } else if let Some(stripped) = filter.strip_prefix("model:") {
+                (stripped, stripped)
+            } else {
+                ("", "Antigravity")
+            };
+
+            if let Some(w) = s.tightest_for_scope(keyword) {
+                return (Some(display_name), Some(w), Some(w.level(t)), Some(w.remaining_percent()));
+            }
+        }
+    }
+
+    // Fallback on overview
+    (
+        None,
+        snap.overview.tightest_window.as_ref(),
+        snap.overview.level,
+        snap.overview.min_remaining,
+    )
+}
+
 pub fn update(app: &AppHandle, snap: &AppSnapshot) {
     let Some(tray) = app.tray_by_id(TRAY_ID) else { return };
     let o = &snap.overview;
     let lang = snap.settings.resolved_language;
+    let (target_label, target_win, target_level, target_rem) = target_for_filter(snap, &snap.active_filter);
+
     let all_failed = o.active_count > 0 && o.level.is_none() && !o.any_loading && o.has_issue;
-    let state = match (o.level, o.min_remaining) {
+    let state = match (target_level, target_rem) {
         (Some(level), Some(remaining)) => IconState::Gauge { remaining, level, issue: o.has_issue },
         _ if all_failed => IconState::Error,
         _ => IconState::Idle,
@@ -113,15 +178,22 @@ pub fn update(app: &AppHandle, snap: &AppSnapshot) {
     let visible: Vec<_> = snap.reports.iter().filter(|r| r.visible()).collect();
     let title = match snap.settings.display {
         DisplayMode::IconOnly => String::new(),
-        DisplayMode::Compact => o.min_remaining.map(|r| format!("{r:.0}%")).unwrap_or_default(),
-        DisplayMode::Full => visible
-            .iter()
-            .filter_map(|r| {
-                let w = r.snapshot.as_ref()?.tightest()?;
-                Some(format!("{} {:.0}%", r.name.split(' ').next().unwrap_or(&r.name), w.remaining_percent()))
-            })
-            .collect::<Vec<_>>()
-            .join("  "),
+        DisplayMode::Compact => match (target_label, target_rem) {
+            (Some(name), Some(r)) => format!("{name} {r:.0}%"),
+            (None, Some(r)) => format!("{r:.0}%"),
+            _ => String::new(),
+        },
+        DisplayMode::Full => match (target_label, target_win, target_rem) {
+            (Some(name), Some(w), Some(r)) => format!("{name} {r:.0}% ({})", countdown(w.resets_at, now, lang)),
+            _ => visible
+                .iter()
+                .filter_map(|r| {
+                    let w = r.snapshot.as_ref()?.tightest()?;
+                    Some(format!("{} {:.0}%", r.name.split(' ').next().unwrap_or(&r.name), w.remaining_percent()))
+                })
+                .collect::<Vec<_>>()
+                .join("  "),
+        },
     };
     let _ = tray.set_title(if title.is_empty() { None } else { Some(title) });
 
