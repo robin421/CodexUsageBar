@@ -1,7 +1,6 @@
 <script lang="ts">
   import Gauge from "./Gauge.svelte";
-  import Timeline from "./Timeline.svelte";
-  import { countdown, resetClock, windowName } from "../lib/format";
+  import { countdown, levelOf, remaining, resetClock, windowName } from "../lib/format";
   import { t } from "../lib/i18n";
   import type { Lang, Overview, ProviderReport, Thresholds } from "../lib/types";
 
@@ -9,6 +8,28 @@
 
   const w = $derived(overview.tightest_window);
   const provider = $derived(reports.find((r) => r.id === overview.tightest_provider));
+
+  // Clean summary of active tools
+  const activeTools = $derived.by(() => {
+    return reports
+      .filter((r) => r.snapshot && r.snapshot.windows.length > 0)
+      .map((r) => {
+        const snap = r.snapshot!;
+        const usable = snap.windows.filter((win) => remaining(win) > 0);
+        const win = usable.length > 0
+          ? usable.reduce((min, cur) => remaining(cur) < remaining(min) ? cur : min)
+          : snap.windows.reduce((min, cur) => remaining(cur) < remaining(min) ? cur : min);
+        const rem = remaining(win);
+        const lvl = levelOf(win, thresholds);
+        return {
+          id: r.id,
+          name: r.name,
+          pct: Math.round(rem),
+          level: lvl,
+          scope: win.scope,
+        };
+      });
+  });
 </script>
 
 {#if w && provider}
@@ -21,7 +42,7 @@
         </div>
       </Gauge>
       <div class="detail">
-        <span class="caption">{$t("lowestLabel")}</span>
+        <span class="caption">{overview.level === "normal" ? (lang === "zh" ? "当前可用额度" : "Available Headroom") : $t("lowestLabel")}</span>
         <h2>{provider.name}</h2>
         <p class="window">
           {windowName(w, lang)}
@@ -31,14 +52,25 @@
         {#if w.resets_at}<p class="clock">{resetClock(w.resets_at, now, lang)}</p>{/if}
       </div>
     </div>
-    <Timeline {reports} {thresholds} {lang} {now} />
+
+    {#if activeTools.length > 1}
+      <div class="tool-strip">
+        {#each activeTools as tool (tool.id)}
+          <div class="tool-chip" data-level={tool.level}>
+            <span class="dot"></span>
+            <span class="tool-name">{tool.name}</span>
+            <span class="tool-pct">{tool.pct}%</span>
+          </div>
+        {/each}
+      </div>
+    {/if}
   </section>
 {/if}
 
 <style>
   .hero {
     margin: 0 var(--s-3);
-    padding: var(--s-4) var(--s-4) var(--s-2);
+    padding: var(--s-4) var(--s-4) var(--s-3);
     border-radius: var(--r-lg);
     background: var(--surface);
     border: 1px solid var(--line);
@@ -49,7 +81,6 @@
     display: flex;
     align-items: center;
     gap: var(--s-4);
-    margin-bottom: var(--s-3);
   }
   .readout {
     display: flex;
@@ -114,5 +145,50 @@
   .clock {
     font-size: var(--fs-sm);
     color: var(--ink-3);
+  }
+  .tool-strip {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: var(--s-3);
+    padding-top: var(--s-3);
+    border-top: 1px solid var(--line);
+  }
+  .tool-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    border-radius: var(--r-sm);
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    font-size: var(--fs-xs);
+    line-height: 1.2;
+  }
+  .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--good);
+  }
+  .tool-chip[data-level="warning"] .dot {
+    background: var(--warn);
+  }
+  .tool-chip[data-level="critical"] .dot {
+    background: var(--crit);
+  }
+  .tool-name {
+    font-weight: 500;
+    color: var(--ink-2);
+  }
+  .tool-pct {
+    font-weight: 600;
+    color: var(--ink);
+  }
+  .tool-chip[data-level="warning"] .tool-pct {
+    color: var(--warn);
+  }
+  .tool-chip[data-level="critical"] .tool-pct {
+    color: var(--crit);
   }
 </style>

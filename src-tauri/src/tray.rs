@@ -104,7 +104,7 @@ pub fn update(app: &AppHandle, snap: &AppSnapshot) {
         _ => IconState::Idle,
     };
     // macOS: a template icon blends into the menu bar while all is well; colour appears only on alerts.
-    let template = cfg!(target_os = "macos") && matches!(state, IconState::Gauge { level: Level::Normal, issue: false, .. } | IconState::Idle);
+    let template = cfg!(target_os = "macos") && matches!(state, IconState::Gauge { level: Level::Normal, .. } | IconState::Idle);
     let style = if template { IconStyle::Template } else { IconStyle::Color };
     let _ = tray.set_icon(Some(Image::new_owned(icon::render(state, style, ICON_PX), ICON_PX, ICON_PX)));
     let _ = tray.set_icon_as_template(template);

@@ -301,6 +301,14 @@ impl Snapshot {
             .iter()
             .min_by(|a, b| a.remaining_percent().total_cmp(&b.remaining_percent()))
     }
+
+    /// The window with the least headroom left among windows that still have remaining quota (> 0%).
+    pub fn tightest_usable(&self) -> Option<&QuotaWindow> {
+        self.windows
+            .iter()
+            .filter(|w| w.remaining_percent() > 0.0)
+            .min_by(|a, b| a.remaining_percent().total_cmp(&b.remaining_percent()))
+    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord)]
@@ -411,6 +419,15 @@ impl Overview {
         let mut has_issue = false;
         let mut any_loading = false;
         let mut active_count = 0;
+
+        // If ANY window across all visible providers has quota (> 0%), prioritize usable windows
+        // so that an exhausted secondary cap doesn't mask active, usable quota.
+        let has_usable = reports.iter().filter(|r| r.visible()).any(|r| {
+            r.snapshot
+                .as_ref()
+                .is_some_and(|s| s.windows.iter().any(|w| w.remaining_percent() > 0.0))
+        });
+
         for r in reports.iter().filter(|r| r.visible()) {
             active_count += 1;
             match r.status {
@@ -418,14 +435,38 @@ impl Overview {
                 Status::Loading => any_loading = true,
                 _ => {}
             }
-            if let Some(w) = r.snapshot.as_ref().and_then(|s| s.tightest()) {
+            let target_w = if has_usable {
+                r.snapshot.as_ref().and_then(|s| s.tightest_usable())
+            } else {
+                r.snapshot.as_ref().and_then(|s| s.tightest())
+            };
+            if let Some(w) = target_w {
                 if best.is_none_or(|(_, b)| w.remaining_percent() < b.remaining_percent()) {
                     best = Some((r.id, w));
                 }
             }
         }
+
+        let level = match best {
+            Some((_, w)) => {
+                if has_usable {
+                    let lvl = w.level(t);
+                    // As long as there is quota available, top bar should show Normal
+                    // (or Warning if tightest usable is low), NEVER Critical (red).
+                    if lvl == Level::Critical {
+                        Some(Level::Warning)
+                    } else {
+                        Some(lvl)
+                    }
+                } else {
+                    Some(Level::Critical)
+                }
+            }
+            None => None,
+        };
+
         Self {
-            level: best.map(|(_, w)| w.level(t)),
+            level,
             min_remaining: best.map(|(_, w)| w.remaining_percent()),
             tightest_provider: best.map(|(p, _)| p),
             tightest_window: best.map(|(_, w)| w.clone()),

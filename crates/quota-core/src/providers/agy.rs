@@ -70,18 +70,135 @@ struct GoogleTokenResp {
 }
 
 pub async fn fetch(ctx: &Ctx) -> Result<Snapshot> {
+    let accounts = load_all_accounts(ctx);
+    if accounts.is_empty() {
+        let agy_dir = ctx.home.join(".gemini/antigravity-cli");
+        let gemini_dir = ctx.home.join(".gemini");
+        if agy_dir.exists() || gemini_dir.exists() || ctx.find_bin("agy").is_some() {
+            return Err(FetchError::NotLoggedIn);
+        }
+        return Err(FetchError::NotDetected);
+    }
+
+    let is_multi_account = accounts.len() > 1;
+
     // 1. Try local Language Server if ANTIGRAVITY_LS_ADDRESS is in the environment
+    let mut ls_snap = None;
+    let mut ls_account = None;
+
     if let Ok(ls_addr) = std::env::var("ANTIGRAVITY_LS_ADDRESS") {
         if !ls_addr.is_empty() {
             let csrf = std::env::var("ANTIGRAVITY_CSRF_TOKEN").unwrap_or_default();
             if let Ok(snap) = fetch_from_ls(ctx, &ls_addr, &csrf).await {
-                return Ok(snap);
+                ls_account = get_ls_account_email(ctx, &ls_addr, &csrf).await;
+                ls_snap = Some(snap);
             }
         }
     }
 
-    // 2. Fall back to direct Google Cloud Code PA endpoint using stored OAuth credentials
-    fetch_from_cloudcode_pa(ctx).await
+    let mut combined = Snapshot::new(ProviderId::Agy, if ls_snap.is_some() { "antigravity_ls" } else { "oauth" });
+    let mut account_names = Vec::new();
+    let mut has_pro = false;
+
+    if let Some(mut ls_s) = ls_snap {
+        let active_email = ls_account.clone().unwrap_or_else(|| {
+            accounts.first().map(|(e, _)| e.clone()).unwrap_or_else(|| "default".into())
+        });
+        let short_id = active_email.split('@').next().unwrap_or(&active_email).to_string();
+        account_names.push(active_email);
+
+        if ls_s.plan.as_deref() == Some("Pro") {
+            has_pro = true;
+        }
+
+        for mut w in ls_s.windows.drain(..) {
+            if is_multi_account {
+                let base = w.scope.clone().unwrap_or_else(|| "Default".into());
+                w.scope = Some(format!("{base} ({short_id})"));
+                w.id = format!("{short_id}_{}", w.id);
+            }
+            combined.windows.push(w);
+        }
+    }
+
+    for (email, token_info) in &accounts {
+        if ls_account.as_deref() == Some(email.as_str()) {
+            continue;
+        }
+
+        if let Ok(mut snap) = fetch_ccpa_for_account(ctx, email, token_info).await {
+            account_names.push(email.clone());
+            if snap.plan.as_deref() == Some("Pro") {
+                has_pro = true;
+            }
+            let short_id = email.split('@').next().unwrap_or(email);
+            for mut w in snap.windows.drain(..) {
+                if is_multi_account {
+                    let base = w.scope.clone().unwrap_or_else(|| "Default".into());
+                    w.scope = Some(format!("{base} ({short_id})"));
+                    w.id = format!("{short_id}_{}", w.id);
+                }
+                combined.windows.push(w);
+            }
+        }
+    }
+
+    if combined.windows.is_empty() {
+        return Err(FetchError::parse("no active quota buckets found"));
+    }
+
+    combined.account = Some(account_names.join(", "));
+    combined.plan = Some(if has_pro { "Pro".into() } else { "Antigravity".into() });
+
+    // Sort windows: shorter windows (session 5h) first, then weekly, grouped by scope
+    combined.windows.sort_by_key(|w| (w.scope.clone(), w.window_mins.unwrap_or(u32::MAX)));
+
+    Ok(combined)
+}
+
+async fn get_ls_account_email(ctx: &Ctx, ls_addr: &str, csrf: &str) -> Option<String> {
+    let url = format!("http://{ls_addr}/exa.language_server_pb.LanguageServerService/GetLoadCodeAssist");
+    let resp = ctx
+        .http
+        .post(&url)
+        .header("Content-Type", "application/json")
+        .header("Connect-Protocol-Version", "1")
+        .header("x-codeium-csrf-token", csrf)
+        .body("{}")
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: Value = resp.json().await.ok()?;
+    let uri = body
+        .get("response")
+        .and_then(|r| r.get("currentTier"))
+        .and_then(|t| t.get("upgradeSubscriptionUri"))
+        .and_then(|u| u.as_str())?;
+    let re = regex::Regex::new(r"Email=([^&]+)").ok()?;
+    let caps = re.captures(uri)?;
+    let raw = caps.get(1)?.as_str();
+    Some(decode_percent(raw))
+}
+
+fn decode_percent(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut bytes = s.bytes();
+    while let Some(b) = bytes.next() {
+        if b == b'%' {
+            if let (Some(h1), Some(h2)) = (bytes.next(), bytes.next()) {
+                let hex_str = format!("{}{}", h1 as char, h2 as char);
+                if let Ok(num) = u8::from_str_radix(&hex_str, 16) {
+                    out.push(num as char);
+                    continue;
+                }
+            }
+        }
+        out.push(b as char);
+    }
+    out
 }
 
 async fn fetch_from_ls(ctx: &Ctx, ls_addr: &str, csrf: &str) -> Result<Snapshot> {
@@ -106,32 +223,11 @@ async fn fetch_from_ls(ctx: &Ctx, ls_addr: &str, csrf: &str) -> Result<Snapshot>
     let body: Value = resp.json().await?;
     let mut snap = parse_quota_summary(&body)?;
     snap.source = "antigravity_ls".into();
-
-    // Fill account email if present in accounts/settings
-    if snap.account.is_none() {
-        if let Some((email, _)) = load_account_creds(ctx) {
-            snap.account = Some(email);
-        }
-    }
-
     Ok(snap)
 }
 
-async fn fetch_from_cloudcode_pa(ctx: &Ctx) -> Result<Snapshot> {
-    let agy_dir = ctx.home.join(".gemini/antigravity-cli");
-    let gemini_dir = ctx.home.join(".gemini");
-
-    let (email, token_info) = match load_account_creds(ctx) {
-        Some(creds) => creds,
-        None => {
-            if agy_dir.exists() || gemini_dir.exists() || ctx.find_bin("agy").is_some() {
-                return Err(FetchError::NotLoggedIn);
-            }
-            return Err(FetchError::NotDetected);
-        }
-    };
-
-    let access_token = ensure_valid_token(ctx, &token_info).await?;
+async fn fetch_ccpa_for_account(ctx: &Ctx, email: &str, token_info: &StoredToken) -> Result<Snapshot> {
+    let access_token = ensure_valid_token(ctx, token_info).await?;
 
     let resp = ctx
         .http
@@ -144,7 +240,6 @@ async fn fetch_from_cloudcode_pa(ctx: &Ctx) -> Result<Snapshot> {
         .await?;
 
     if resp.status().as_u16() == 401 || resp.status().as_u16() == 403 {
-        // Attempt one fresh refresh in case token was invalidated server-side
         if let Some(refresh_token) = &token_info.refresh_token {
             if let Ok(new_token) = refresh_google_token(ctx, refresh_token).await {
                 let retry_resp = ctx
@@ -160,7 +255,7 @@ async fn fetch_from_cloudcode_pa(ctx: &Ctx) -> Result<Snapshot> {
                 if retry_resp.status().is_success() {
                     let body: Value = retry_resp.json().await?;
                     let mut snap = parse_quota_summary(&body)?;
-                    snap.account = Some(email);
+                    snap.account = Some(email.to_string());
                     return Ok(snap);
                 }
             }
@@ -177,33 +272,40 @@ async fn fetch_from_cloudcode_pa(ctx: &Ctx) -> Result<Snapshot> {
 
     let body: Value = resp.json().await?;
     let mut snap = parse_quota_summary(&body)?;
-    snap.account = Some(email);
+    snap.account = Some(email.to_string());
     Ok(snap)
 }
 
-fn load_account_creds(ctx: &Ctx) -> Option<(String, StoredToken)> {
+fn load_all_accounts(ctx: &Ctx) -> Vec<(String, StoredToken)> {
+    let mut accounts = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
     let accounts_dir = ctx.home.join(".gemini/antigravity-cli/accounts");
 
-    // 1. Check active account from google_accounts.json
+    // 1. Scan accounts directory
+    if let Ok(entries) = std::fs::read_dir(&accounts_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().is_some_and(|ext| ext == "json") {
+                if let Some((email, token)) = read_account_file(&path) {
+                    if seen.insert(email.clone()) {
+                        accounts.push((email, token));
+                    }
+                }
+            }
+        }
+    }
+
+    // 2. Also check active account from google_accounts.json if not present
     let active_json = ctx.home.join(".gemini/google_accounts.json");
     if let Ok(content) = std::fs::read_to_string(&active_json) {
         if let Ok(v) = serde_json::from_str::<Value>(&content) {
             if let Some(active) = v.get("active").and_then(|a| a.as_str()) {
                 let file = accounts_dir.join(format!("{active}.json"));
                 if let Some((email, token)) = read_account_file(&file) {
-                    return Some((email, token));
-                }
-            }
-        }
-    }
-
-    // 2. Scan accounts directory for any .json
-    if let Ok(entries) = std::fs::read_dir(&accounts_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().is_some_and(|ext| ext == "json") {
-                if let Some((email, token)) = read_account_file(&path) {
-                    return Some((email, token));
+                    if seen.insert(email.clone()) {
+                        accounts.push((email, token));
+                    }
                 }
             }
         }
@@ -212,10 +314,12 @@ fn load_account_creds(ctx: &Ctx) -> Option<(String, StoredToken)> {
     // 3. Fallback on macOS Keychain
     #[cfg(target_os = "macos")]
     if let Some((email, token)) = read_keychain_account() {
-        return Some((email, token));
+        if seen.insert(email.clone()) {
+            accounts.push((email, token));
+        }
     }
 
-    None
+    accounts
 }
 
 fn read_account_file(path: &PathBuf) -> Option<(String, StoredToken)> {
@@ -325,19 +429,21 @@ pub fn parse_quota_summary(body: &Value) -> Result<Snapshot> {
         let scope = match group_name {
             "Gemini Models" => "Gemini",
             "Claude and GPT models" => "Claude & GPT",
-            "Gemini 4 Argon" => "Gemini Argon",
+            "Gemini 4 Argon" => "Argon 4",
             other => other,
         };
 
         let buckets = group.get("buckets").and_then(|b| b.as_array());
         if let Some(buckets) = buckets {
             for b in buckets {
-                // If a bucket is explicitly marked disabled, skip it
-                if b.get("disabled").and_then(|d| d.as_bool()).unwrap_or(false) {
+                let bucket_id = b.get("bucketId").and_then(|s| s.as_str()).unwrap_or("quota");
+                let is_argon = bucket_id.contains("argon") || group_name.contains("Argon");
+
+                // Never skip Argon 4 even if disabled
+                if b.get("disabled").and_then(|d| d.as_bool()).unwrap_or(false) && !is_argon {
                     continue;
                 }
 
-                let bucket_id = b.get("bucketId").and_then(|s| s.as_str()).unwrap_or("quota");
                 let remaining_fraction = b.get("remainingFraction").and_then(|f| f.as_f64()).unwrap_or(1.0);
                 let used_percent = ((1.0 - remaining_fraction) * 100.0).clamp(0.0, 100.0);
 
@@ -352,14 +458,16 @@ pub fn parse_quota_summary(body: &Value) -> Result<Snapshot> {
                     _ => (None, WindowKind::Other),
                 };
 
-                if bucket_id.starts_with("3p-") || bucket_id.contains("argon") {
+                if bucket_id.starts_with("3p-") || is_argon {
                     has_pro_bucket = true;
                 }
+
+                let final_scope = if is_argon { "Argon 4" } else { scope };
 
                 snap.windows.push(
                     QuotaWindow::new(bucket_id, window_mins, used_percent)
                         .kind(kind)
-                        .scope(scope)
+                        .scope(final_scope)
                         .resets_at(reset_time),
                 );
             }
@@ -469,5 +577,35 @@ mod tests {
         let s = parse_quota_summary(&fixture).expect("parsed");
         assert_eq!(s.windows.len(), 1);
         assert_eq!(s.windows[0].remaining_percent(), 25.0);
+    }
+
+    #[test]
+    fn parses_gemini_4_argon_group() {
+        let fixture = serde_json::json!({
+            "response": {
+                "groups": [
+                    {
+                        "displayName": "Gemini 4 Argon",
+                        "buckets": [
+                            {
+                                "bucketId": "gemini-argon-wtu-weekly",
+                                "displayName": "Gemini 4 Argon Weekly Limit",
+                                "window": "weekly",
+                                "remainingFraction": 0.0,
+                                "disabled": true,
+                                "resetTime": "2026-11-14T08:51:27Z"
+                            }
+                        ]
+                    }
+                ]
+            }
+        });
+
+        let s = parse_quota_summary(&fixture).expect("parsed");
+        assert_eq!(s.windows.len(), 1);
+        assert_eq!(s.windows[0].scope.as_deref(), Some("Argon 4"));
+        assert_eq!(s.windows[0].id, "gemini-argon-wtu-weekly");
+        assert_eq!(s.windows[0].remaining_percent(), 0.0);
+        assert_eq!(s.plan.as_deref(), Some("Pro"));
     }
 }
