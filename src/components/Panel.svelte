@@ -23,6 +23,13 @@
   const ordered = $derived([...visible.filter((r) => r.snapshot), ...visible.filter((r) => !r.snapshot)]);
   const firstLoad = $derived(snap.reports.length === 0 || (snap.overview.any_loading && visible.every((r) => !r.snapshot) && !snap.last_refresh));
 
+  let selectedFilter = $state<string>("all");
+  const filteredOrdered = $derived(
+    selectedFilter === "all"
+      ? ordered
+      : ordered.filter((r) => r.id === selectedFilter)
+  );
+
   let body: HTMLElement | undefined = $state();
   $effect(() => {
     // Shrink the panel to its content where it hangs from the top of the screen (not Windows,
@@ -75,10 +82,18 @@
       </div>
     {:else}
       <div class="hero-wrap">
-        <Hero overview={snap.overview} reports={visible} {thresholds} {lang} now={$now} />
+        <Hero
+          overview={snap.overview}
+          reports={visible}
+          {thresholds}
+          {lang}
+          now={$now}
+          {selectedFilter}
+          onSelectFilter={(id) => (selectedFilter = id)}
+        />
       </div>
       <div class="list">
-        {#each ordered as report (report.id)}
+        {#each filteredOrdered as report (report.id)}
           <ProviderSection {report} {thresholds} {lang} now={$now} onRetry={refresh} />
         {/each}
       </div>

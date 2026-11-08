@@ -4,10 +4,59 @@
   import { t } from "../lib/i18n";
   import type { Lang, Overview, ProviderReport, Thresholds } from "../lib/types";
 
-  let { overview, reports, thresholds, lang, now }: { overview: Overview; reports: ProviderReport[]; thresholds: Thresholds; lang: Lang; now: number } = $props();
+  let {
+    overview,
+    reports,
+    thresholds,
+    lang,
+    now,
+    selectedFilter = "all",
+    onSelectFilter,
+  }: {
+    overview: Overview;
+    reports: ProviderReport[];
+    thresholds: Thresholds;
+    lang: Lang;
+    now: number;
+    selectedFilter?: string;
+    onSelectFilter?: (id: string) => void;
+  } = $props();
 
-  const w = $derived(overview.tightest_window);
-  const provider = $derived(reports.find((r) => r.id === overview.tightest_provider));
+  // Selected tool report if filter is not "all"
+  const selectedReport = $derived(
+    selectedFilter !== "all" ? reports.find((r) => r.id === selectedFilter) : null
+  );
+
+  // Derive target window, provider, remaining, and level based on filter
+  const current = $derived.by(() => {
+    if (selectedReport && selectedReport.snapshot && selectedReport.snapshot.windows.length > 0) {
+      const snap = selectedReport.snapshot;
+      const usable = snap.windows.filter((win) => remaining(win) > 0);
+      const win = usable.length > 0
+        ? usable.reduce((min, cur) => remaining(cur) < remaining(min) ? cur : min)
+        : snap.windows.reduce((min, cur) => remaining(cur) < remaining(min) ? cur : min);
+      const rem = remaining(win);
+      const lvl = levelOf(win, thresholds);
+      return {
+        window: win,
+        provider: selectedReport,
+        remaining: rem,
+        level: lvl,
+      };
+    }
+
+    const w = overview.tightest_window;
+    const provider = reports.find((r) => r.id === overview.tightest_provider);
+    return {
+      window: w,
+      provider: provider,
+      remaining: overview.min_remaining,
+      level: overview.level,
+    };
+  });
+
+  const w = $derived(current.window);
+  const provider = $derived(current.provider);
 
   // Clean summary of active tools
   const activeTools = $derived.by(() => {
@@ -30,19 +79,36 @@
         };
       });
   });
+
+  function toggleFilter(id: string) {
+    if (!onSelectFilter) return;
+    if (selectedFilter === id) {
+      onSelectFilter("all");
+    } else {
+      onSelectFilter(id);
+    }
+  }
 </script>
 
 {#if w && provider}
-  <section class="hero" data-level={overview.level} aria-label={$t("lowestLabel")}>
+  <section class="hero" data-level={current.level} aria-label={$t("lowestLabel")}>
     <div class="lead">
-      <Gauge remaining={overview.min_remaining} level={overview.level}>
+      <Gauge remaining={current.remaining} level={current.level}>
         <div class="readout">
-          <span class="pct">{Math.round(overview.min_remaining ?? 0)}<small>%</small></span>
+          <span class="pct">{Math.round(current.remaining ?? 0)}<small>%</small></span>
           <span class="unit">{$t("remaining")}</span>
         </div>
       </Gauge>
       <div class="detail">
-        <span class="caption">{overview.level === "normal" ? (lang === "zh" ? "当前可用额度" : "Available Headroom") : $t("lowestLabel")}</span>
+        <span class="caption">
+          {#if selectedFilter !== "all"}
+            {provider.name} {lang === "zh" ? "额度" : "Quota"}
+          {:else if current.level === "normal"}
+            {lang === "zh" ? "当前可用额度" : "Available Headroom"}
+          {:else}
+            {$t("lowestLabel")}
+          {/if}
+        </span>
         <h2>{provider.name}</h2>
         <p class="window">
           {windowName(w, lang)}
@@ -55,12 +121,27 @@
 
     {#if activeTools.length > 1}
       <div class="tool-strip">
+        <button
+          type="button"
+          class="tool-chip"
+          class:active={selectedFilter === "all"}
+          onclick={() => toggleFilter("all")}
+        >
+          <span class="tool-name">{lang === "zh" ? "全部" : "All"}</span>
+        </button>
+
         {#each activeTools as tool (tool.id)}
-          <div class="tool-chip" data-level={tool.level}>
+          <button
+            type="button"
+            class="tool-chip"
+            class:active={selectedFilter === tool.id}
+            data-level={tool.level}
+            onclick={() => toggleFilter(tool.id)}
+          >
             <span class="dot"></span>
             <span class="tool-name">{tool.name}</span>
             <span class="tool-pct">{tool.pct}%</span>
-          </div>
+          </button>
         {/each}
       </div>
     {/if}
@@ -155,15 +236,33 @@
     border-top: 1px solid var(--line);
   }
   .tool-chip {
+    appearance: none;
+    -webkit-appearance: none;
+    cursor: pointer;
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    padding: 3px 8px;
+    padding: 4px 10px;
     border-radius: var(--r-sm);
     background: var(--surface-2);
     border: 1px solid var(--line);
     font-size: var(--fs-xs);
+    font-family: inherit;
     line-height: 1.2;
+    transition: all 0.15s ease;
+  }
+  .tool-chip:hover {
+    background: var(--surface);
+    border-color: var(--ink-3);
+  }
+  .tool-chip.active {
+    background: var(--surface);
+    border-color: var(--ink);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+  }
+  .tool-chip.active .tool-name {
+    color: var(--ink);
+    font-weight: 600;
   }
   .dot {
     width: 6px;
