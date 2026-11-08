@@ -20,6 +20,8 @@ const ICON_PX: u32 = 64;
 
 /// When the panel last hid because it lost focus; a tray click right after must not reopen it.
 static LAST_BLUR_HIDE: Mutex<Option<Instant>> = Mutex::new(None);
+/// When the panel was last shown; focus-outs right after (tray menu closing, WM settling) are ignored.
+static LAST_SHOW: Mutex<Option<Instant>> = Mutex::new(None);
 /// Set once the tray has reported its on-screen position (never happens on Linux AppIndicator).
 static TRAY_POSITION_KNOWN: AtomicBool = AtomicBool::new(false);
 
@@ -157,6 +159,7 @@ pub fn toggle_panel(app: &AppHandle) {
 pub fn show_panel(app: &AppHandle) {
     let Some(win) = app.get_webview_window("panel") else { return };
     // Show before positioning: a hidden GTK window reports a 0x0 size, which breaks the maths.
+    *LAST_SHOW.lock().unwrap() = Some(Instant::now());
     let _ = win.show();
     // Hang the panel from the tray icon when we know where it is; otherwise use the screen corner
     // where trays live on this platform (Windows taskbar bottom-right, macOS/Linux top-right).
@@ -208,6 +211,9 @@ fn place_in_corner(win: &tauri::WebviewWindow) {
 }
 
 pub fn on_panel_blur(app: &AppHandle) {
+    if LAST_SHOW.lock().unwrap().is_some_and(|t| t.elapsed() < Duration::from_millis(600)) {
+        return;
+    }
     if let Some(win) = app.get_webview_window("panel") {
         if win.is_visible().unwrap_or(false) {
             let _ = win.hide();
