@@ -107,4 +107,27 @@ mod tests {
         assert!(o.has_issue);
         assert_eq!(o.active_count, 3);
     }
+
+    #[test]
+    fn tightest_for_account_skips_unallocated_models() {
+        let mut s = Snapshot::new(ProviderId::Agy, "oauth");
+        // Flash 100%
+        let mut w_flash = QuotaWindow::new("robin421_flash", Some(10080), 0.0).scope("Gemini 3.8 Flash (robin421)");
+        w_flash.account = Some("robin421@gmail.com".into());
+        s.windows.push(w_flash);
+
+        // Claude 24%
+        let mut w_claude = QuotaWindow::new("robin421_claude", Some(10080), 76.0).scope("Claude & GPT (robin421)");
+        w_claude.account = Some("robin421@gmail.com".into());
+        s.windows.push(w_claude);
+
+        // Argon 4 0% (unallocated: resets_at is None)
+        let mut w_argon = QuotaWindow::new("robin421_argon", Some(10080), 100.0).scope("Argon 4 (robin421)");
+        w_argon.account = Some("robin421@gmail.com".into());
+        s.windows.push(w_argon);
+
+        let t = s.tightest_for_account("robin421@gmail.com").expect("found");
+        assert_eq!(t.id, "robin421_claude", "should pick Claude 24%, not unallocated Argon 0%");
+        assert_eq!(t.remaining_percent(), 24.0);
+    }
 }

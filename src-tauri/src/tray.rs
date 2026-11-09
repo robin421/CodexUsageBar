@@ -93,6 +93,17 @@ fn build_menu(app: &AppHandle, snap: Option<&AppSnapshot>, lang: Lang) -> tauri:
     Ok(menu)
 }
 
+fn safe_level(w: &quota_core::QuotaWindow, t: &quota_core::Thresholds) -> Level {
+    let rem = w.remaining_percent();
+    if rem <= 0.0 {
+        Level::Critical
+    } else if rem < t.warning {
+        Level::Warning
+    } else {
+        Level::Normal
+    }
+}
+
 fn target_for_filter<'a>(
     snap: &'a AppSnapshot,
     filter: &'a str,
@@ -111,7 +122,7 @@ fn target_for_filter<'a>(
     if let Some(r) = snap.reports.iter().find(|r| r.id.slug() == filter) {
         if let Some(s) = r.snapshot.as_ref() {
             if let Some(w) = s.tightest() {
-                return (Some(r.name.as_str()), Some(w), Some(w.level(t)), Some(w.remaining_percent()));
+                return (Some(r.name.as_str()), Some(w), Some(safe_level(w, t)), Some(w.remaining_percent()));
             }
         }
         return (Some(r.name.as_str()), None, None, None);
@@ -140,7 +151,7 @@ fn target_for_filter<'a>(
                 return (
                     Some(short),
                     w,
-                    w.map(|win| win.level(t)),
+                    w.map(|win| safe_level(win, t)),
                     w.map(|win| win.remaining_percent()),
                 );
             }
@@ -164,7 +175,7 @@ fn target_for_filter<'a>(
             };
 
             if let Some(win) = w {
-                return (Some(display_name), Some(win), Some(win.level(t)), Some(win.remaining_percent()));
+                return (Some(display_name), Some(win), Some(safe_level(win, t)), Some(win.remaining_percent()));
             }
         }
     }
@@ -186,12 +197,22 @@ pub fn update(app: &AppHandle, snap: &AppSnapshot) {
 
     let all_failed = o.active_count > 0 && o.level.is_none() && !o.any_loading && o.has_issue;
     let state = match (target_level, target_rem) {
-        (Some(level), Some(remaining)) => IconState::Gauge { remaining, level, issue: o.has_issue },
+        (Some(level), Some(remaining)) => {
+            let icon_level = if remaining <= 0.0 {
+                Level::Critical
+            } else if level == Level::Critical {
+                Level::Warning
+            } else {
+                level
+            };
+            IconState::Gauge { remaining, level: icon_level, issue: o.has_issue }
+        }
         _ if all_failed => IconState::Error,
         _ => IconState::Idle,
     };
-    // macOS: a template icon blends into the menu bar while all is well; colour appears only on alerts.
-    let template = cfg!(target_os = "macos") && matches!(state, IconState::Gauge { level: Level::Normal, .. } | IconState::Idle);
+    // macOS: always use template icon so it is crisp white in Dark Mode and crisp black in Light Mode.
+    // Red colored icons in the macOS menu bar have terrible contrast and are unreadable.
+    let template = cfg!(target_os = "macos");
     let style = if template { IconStyle::Template } else { IconStyle::Color };
     let _ = tray.set_icon(Some(Image::new_owned(icon::render(state, style, ICON_PX), ICON_PX, ICON_PX)));
     let _ = tray.set_icon_as_template(template);

@@ -305,35 +305,62 @@ impl Snapshot {
 
     /// The window with the least headroom left (the bottleneck window).
     pub fn tightest(&self) -> Option<&QuotaWindow> {
-        self.windows
-            .iter()
-            .min_by(|a, b| a.remaining_percent().total_cmp(&b.remaining_percent()))
+        let all: Vec<_> = self.windows.iter().collect();
+        let allocated: Vec<_> = all.iter().filter(|w| !is_unallocated(w)).copied().collect();
+        let pool = if allocated.is_empty() { &all } else { &allocated };
+
+        let positive: Vec<_> = pool.iter().filter(|w| w.remaining_percent() > 0.0).copied().collect();
+        if !positive.is_empty() {
+            return positive.into_iter().min_by(|a, b| a.remaining_percent().total_cmp(&b.remaining_percent()));
+        }
+
+        pool.iter().min_by(|a, b| a.remaining_percent().total_cmp(&b.remaining_percent())).copied()
     }
 
     /// The bottleneck window for a specific scope or model (e.g. "Gemini 3.8 Flash", "Argon 4").
     pub fn tightest_for_scope(&self, keyword: &str) -> Option<&QuotaWindow> {
-        self.windows
+        let matched: Vec<_> = self.windows
             .iter()
             .filter(|w| w.scope.as_deref().is_some_and(|s| s.contains(keyword)))
-            .min_by(|a, b| a.remaining_percent().total_cmp(&b.remaining_percent()))
+            .collect();
+
+        let allocated: Vec<_> = matched.iter().filter(|w| !is_unallocated(w)).copied().collect();
+        let pool = if allocated.is_empty() { &matched } else { &allocated };
+
+        let positive: Vec<_> = pool.iter().filter(|w| w.remaining_percent() > 0.0).copied().collect();
+        if !positive.is_empty() {
+            return positive.into_iter().min_by(|a, b| a.remaining_percent().total_cmp(&b.remaining_percent()));
+        }
+
+        pool.iter().min_by(|a, b| a.remaining_percent().total_cmp(&b.remaining_percent())).copied()
     }
 
     /// The bottleneck window for a specific account.
     pub fn tightest_for_account(&self, account: &str) -> Option<&QuotaWindow> {
         let short = account.split('@').next().unwrap_or(account);
-        self.windows
+        let acc_windows: Vec<_> = self.windows
             .iter()
             .filter(|w| {
                 w.account.as_deref().is_some_and(|a| a == account || a.split('@').next() == Some(short))
                     || w.scope.as_deref().is_some_and(|s| s.contains(short))
             })
-            .min_by(|a, b| a.remaining_percent().total_cmp(&b.remaining_percent()))
+            .collect();
+
+        let allocated: Vec<_> = acc_windows.iter().filter(|w| !is_unallocated(w)).copied().collect();
+        let pool = if allocated.is_empty() { &acc_windows } else { &allocated };
+
+        let positive: Vec<_> = pool.iter().filter(|w| w.remaining_percent() > 0.0).copied().collect();
+        if !positive.is_empty() {
+            return positive.into_iter().min_by(|a, b| a.remaining_percent().total_cmp(&b.remaining_percent()));
+        }
+
+        pool.iter().min_by(|a, b| a.remaining_percent().total_cmp(&b.remaining_percent())).copied()
     }
 
     /// The bottleneck window for a specific account and scope keyword.
     pub fn tightest_for_account_and_scope(&self, account: &str, keyword: &str) -> Option<&QuotaWindow> {
         let short = account.split('@').next().unwrap_or(account);
-        self.windows
+        let acc_windows: Vec<_> = self.windows
             .iter()
             .filter(|w| {
                 let matches_acc = w.account.as_deref().is_some_and(|a| a == account || a.split('@').next() == Some(short))
@@ -341,8 +368,22 @@ impl Snapshot {
                 let matches_kw = keyword.is_empty() || w.scope.as_deref().is_some_and(|s| s.contains(keyword));
                 matches_acc && matches_kw
             })
-            .min_by(|a, b| a.remaining_percent().total_cmp(&b.remaining_percent()))
+            .collect();
+
+        let allocated: Vec<_> = acc_windows.iter().filter(|w| !is_unallocated(w)).copied().collect();
+        let pool = if allocated.is_empty() { &acc_windows } else { &allocated };
+
+        let positive: Vec<_> = pool.iter().filter(|w| w.remaining_percent() > 0.0).copied().collect();
+        if !positive.is_empty() {
+            return positive.into_iter().min_by(|a, b| a.remaining_percent().total_cmp(&b.remaining_percent()));
+        }
+
+        pool.iter().min_by(|a, b| a.remaining_percent().total_cmp(&b.remaining_percent())).copied()
     }
+}
+
+pub fn is_unallocated(w: &QuotaWindow) -> bool {
+    w.remaining_percent() <= 0.0 && w.resets_at.is_none()
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, PartialOrd, Ord)]
@@ -475,6 +516,9 @@ impl Overview {
                             .filter(|w| w.scope.as_deref() == Some(scope))
                             .min_by(|a, b| a.remaining_percent().total_cmp(&b.remaining_percent()))
                         {
+                            if is_unallocated(w) {
+                                continue;
+                            }
                             all_bottlenecks.push((r.id, w));
                             if w.remaining_percent() > 0.0 {
                                 usable_windows.push((r.id, w));
@@ -482,9 +526,11 @@ impl Overview {
                         }
                     }
                 } else if let Some(w) = s.tightest() {
-                    all_bottlenecks.push((r.id, w));
-                    if w.remaining_percent() > 0.0 {
-                        usable_windows.push((r.id, w));
+                    if !is_unallocated(w) {
+                        all_bottlenecks.push((r.id, w));
+                        if w.remaining_percent() > 0.0 {
+                            usable_windows.push((r.id, w));
+                        }
                     }
                 }
             }
