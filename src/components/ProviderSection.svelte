@@ -107,32 +107,21 @@
     </div>
 
     {#if report.id === "agy" && accounts.length > 1}
-      <div class="account-switcher">
+      <div class="account-switcher" role="tablist">
         {#each accounts as acc (acc)}
-          {@const isCurActive = activeAgyAccount === acc}
           {@const isSelected = selectedAccount === acc}
           <button
             type="button"
             class="acc-chip"
             class:selected={isSelected}
-            class:is-active-cli={isCurActive}
+            role="tab"
+            aria-selected={isSelected}
             onclick={() => onSelectAccount?.(acc)}
-            title="{acc} {isCurActive ? (lang === 'zh' ? '(当前CLI活动账号)' : '(Current CLI active)') : ''}"
+            title={acc}
           >
-            <span class="acc-name">{acc.split('@')[0]}</span>
-            {#if isCurActive}<span class="cli-badge" title={lang === 'zh' ? '当前CLI账号' : 'Active CLI account'}>CLI</span>{/if}
+            {acc.split('@')[0]}
           </button>
         {/each}
-        {#if onSwitchAccount && selectedAccount && activeAgyAccount !== selectedAccount}
-          <button
-            type="button"
-            class="btn-set-active"
-            onclick={() => onSwitchAccount?.(selectedAccount!)}
-            title={lang === "zh" ? "设为当前 CLI 活动账号" : "Set as active CLI account"}
-          >
-            {lang === "zh" ? "设为活动" : "Set Active"}
-          </button>
-        {/if}
       </div>
     {:else if snap?.plan}
       <span class="plan">{snap.plan}</span>
@@ -255,60 +244,33 @@
     color: var(--ink-2);
   }
   .account-switcher {
-    display: flex;
+    display: inline-flex;
     align-items: center;
-    gap: 4px;
+    background: var(--inset);
+    padding: 2px;
+    border-radius: var(--r-md);
+    gap: 2px;
     margin-left: auto;
   }
   .acc-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 3px;
-    padding: 2px 7px;
+    padding: 2px 8px;
     border-radius: var(--r-sm);
-    border: 1px solid var(--line);
-    background: var(--surface);
+    border: none;
+    background: transparent;
     color: var(--ink-2);
     font-size: var(--fs-xs);
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
   }
   .acc-chip:hover {
-    border-color: var(--line-strong);
     color: var(--ink);
   }
   .acc-chip.selected {
-    background: var(--ink);
-    color: var(--paper);
-    border-color: var(--ink);
-  }
-  .cli-badge {
-    padding: 0 3px;
-    border-radius: 2px;
-    background: var(--ink-3);
-    color: var(--paper);
-    font-size: 9px;
-    font-weight: 600;
-    line-height: 12px;
-  }
-  .acc-chip.selected .cli-badge {
     background: var(--paper);
     color: var(--ink);
-  }
-  .btn-set-active {
-    padding: 2px 6px;
-    border-radius: var(--r-sm);
-    border: 1px dashed var(--line-strong);
-    background: transparent;
-    color: var(--ink-3);
-    font-size: 10px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-  .btn-set-active:hover {
-    border-color: var(--ink-2);
-    color: var(--ink);
+    font-weight: 600;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
   }
   .account {
     overflow: hidden;

@@ -128,15 +128,33 @@ fn hide_panel(app: AppHandle) {
 }
 
 /// Sizes the panel to its content. GTK only honours size changes on resizable windows, so on
-/// Linux the (undecorated, hence not user-resizable) panel stays resizable; elsewhere the flag
-/// is lifted just for the change.
+/// Linux the (undecorated, hence not user-resizable) panel stays resizable.
+/// On macOS, set_size works directly on non-resizable windows without toggling resizable flags,
+/// which avoids window shadow and stylemask redraw flickering.
 #[tauri::command]
 fn fit_panel(app: AppHandle, height: f64) {
     let Some(w) = app.get_webview_window("panel") else { return };
-    let size = tauri::LogicalSize::new(384.0, height.clamp(240.0, 640.0).round());
-    if cfg!(target_os = "linux") {
+    let target_height = height.clamp(200.0, 640.0).round();
+
+    if let Ok(cur_size) = w.inner_size() {
+        let scale = w.scale_factor().unwrap_or(1.0);
+        let cur_logical_h = (cur_size.height as f64 / scale).round();
+        if (cur_logical_h - target_height).abs() < 2.0 {
+            return;
+        }
+    }
+
+    let size = tauri::LogicalSize::new(384.0, target_height);
+    #[cfg(target_os = "linux")]
+    {
         let _ = w.set_size(size);
-    } else {
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let _ = w.set_size(size);
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
         let _ = w.set_resizable(true);
         let _ = w.set_size(size);
         let _ = w.set_resizable(false);

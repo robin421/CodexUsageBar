@@ -227,9 +227,10 @@ fn ensure_account_models_complete(
         combined.windows.push(w);
     }
     if !has_argon {
-        let mut w = QuotaWindow::new(format!("{short_id}_gemini-argon-wtu-weekly"), Some(10080), 0.0)
+        // When Google does not return an Argon 4 bucket, the account has no Argon 4 quota.
+        // Set used_percent to 100.0 (0% remaining) and no reset countdown.
+        let mut w = QuotaWindow::new(format!("{short_id}_gemini-argon-wtu-weekly"), Some(10080), 100.0)
             .kind(WindowKind::Weekly)
-            .resets_at(existing_weekly_reset)
             .scope(fmt_scope("Argon 4"));
         w.account = Some(email.to_string());
         combined.windows.push(w);
@@ -752,5 +753,23 @@ mod tests {
         assert_eq!(s.windows[0].id, "gemini-argon-wtu-weekly");
         assert_eq!(s.windows[0].remaining_percent(), 0.0);
         assert_eq!(s.plan.as_deref(), Some("Pro"));
+    }
+
+    #[test]
+    fn ensure_account_models_complete_fills_missing_argon_as_zero() {
+        let mut snap = Snapshot::new(ProviderId::Agy, "test");
+        let email = "robin421@gmail.com";
+        // User has only Claude & GPT
+        let mut claude_w = QuotaWindow::new("robin421_3p-weekly", Some(10080), 76.0)
+            .kind(WindowKind::Weekly)
+            .scope("Claude & GPT (robin421)");
+        claude_w.account = Some(email.to_string());
+        snap.windows.push(claude_w);
+
+        ensure_account_models_complete(&mut snap, email, true);
+
+        let argon = snap.windows.iter().find(|w| w.scope.as_deref() == Some("Argon 4 (robin421)")).expect("argon present");
+        assert_eq!(argon.remaining_percent(), 0.0, "missing argon should have 0% remaining");
+        assert!(argon.resets_at.is_none(), "unallocated argon should have no reset time");
     }
 }

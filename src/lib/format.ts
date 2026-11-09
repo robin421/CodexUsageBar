@@ -25,6 +25,7 @@ export function span(ms: number, lang: Lang): string {
 export function countdown(resetsAt: string | null, now: number, lang: Lang, rem?: number | null): string {
   if (!resetsAt) {
     if (rem != null && Math.round(rem) >= 100) return lang === "zh" ? "额度充足" : "Full Quota";
+    if (rem != null && Math.round(rem) <= 0) return lang === "zh" ? "当前无配额" : "No Quota";
     return translate(lang, "resetsUnknown");
   }
   const ms = Date.parse(resetsAt) - now;
