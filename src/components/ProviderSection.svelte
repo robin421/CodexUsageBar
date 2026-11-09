@@ -2,7 +2,7 @@
   import Icon from "./Icon.svelte";
   import Meter from "./Meter.svelte";
   import Monogram from "./Monogram.svelte";
-  import { amounts, countdown, expectedRemaining, levelOf, money, remaining, resetClock, windowName } from "../lib/format";
+  import { amounts, countdown, levelOf, money, remaining, resetClock, windowName } from "../lib/format";
   import { t } from "../lib/i18n";
   import { api } from "../lib/api";
   import type { Issue, Lang, ProviderReport, Thresholds } from "../lib/types";
@@ -142,8 +142,6 @@
     {#each displayWindows as w (w.id)}
       {@const rem = remaining(w)}
       {@const level = levelOf(w, thresholds)}
-      {@const expected = expectedRemaining(w, now)}
-      {@const ahead = expected != null && rem / 100 < expected - 0.1}
       {@const amt = amounts(w, lang)}
       {@const cleanedScope = cleanScope(w.scope, report.id === "agy" ? selectedAccount : null)}
       <div class="window" data-level={level}>
@@ -157,12 +155,11 @@
             {/if}
             <span class="window-kind">{windowName(w, lang)}</span>
           </span>
-          {#if ahead}<span class="pace">{$t("aheadOfPace")}</span>{/if}
           <span class="pct">{Math.round(rem)}%</span>
         </div>
-        <Meter remaining={rem} {level} {expected} label={cleanedScope || windowName(w, lang)} />
+        <Meter remaining={rem} {level} label={cleanedScope || windowName(w, lang)} />
         <div class="row sub">
-          <span class="when">{countdown(w.resets_at, now, lang, rem)}</span>
+          <span class="when">{countdown(w.resets_at, now, lang, rem, w)}</span>
           <span class="right">{amt ?? resetClock(w.resets_at, now, lang)}</span>
         </div>
       </div>
@@ -341,10 +338,6 @@
     color: var(--ink-3);
     font-size: var(--fs-xs);
     white-space: nowrap;
-  }
-  .pace {
-    font-size: var(--fs-xs);
-    color: var(--warn);
   }
   .pct {
     font-size: var(--fs-md);

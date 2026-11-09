@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use chrono::Utc;
-use quota_core::format::{countdown, window_name, Lang};
+use quota_core::format::{countdown_window, window_name, Lang};
 use quota_core::{refresh_all, Ctx, Issue, Status};
 
 #[tokio::main]
@@ -29,7 +29,7 @@ async fn main() {
                     "  {:<28} {:>5.1}% left   {}",
                     window_name(w, lang),
                     w.remaining_percent(),
-                    countdown(w.resets_at, now, lang)
+                    countdown_window(w, now, lang)
                 );
             }
             for b in &s.balances {

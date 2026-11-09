@@ -3,7 +3,7 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use chrono::Utc;
-use quota_core::format::{countdown, short_label, Lang};
+use quota_core::format::{countdown_window, short_label, Lang};
 use quota_core::icon::{self, IconState, IconStyle};
 use quota_core::{Level, Status};
 use tauri::image::Image;
@@ -74,7 +74,7 @@ fn build_menu(app: &AppHandle, snap: Option<&AppSnapshot>, lang: Lang) -> tauri:
                     short_label(w),
                     tr(lang, "剩余 ", ""),
                     w.remaining_percent(),
-                    countdown(w.resets_at, now, lang)
+                    countdown_window(w, now, lang)
                 ),
                 None => format!("{}  {}", r.name, tr(lang, "需要处理", "needs attention")),
             };
@@ -206,7 +206,7 @@ pub fn update(app: &AppHandle, snap: &AppSnapshot) {
             _ => String::new(),
         },
         DisplayMode::Full => match (target_label, target_win, target_rem) {
-            (Some(name), Some(w), Some(r)) => format!("{name} {r:.0}% ({})", countdown(w.resets_at, now, lang)),
+            (Some(name), Some(w), Some(r)) => format!("{name} {r:.0}% ({})", countdown_window(w, now, lang)),
             _ => visible
                 .iter()
                 .filter_map(|r| {
@@ -227,7 +227,7 @@ pub fn update(app: &AppHandle, snap: &AppSnapshot) {
                 r.name,
                 short_label(w),
                 w.remaining_percent(),
-                countdown(w.resets_at, now, lang)
+                countdown_window(w, now, lang)
             )),
             _ => tip.push(format!("{}: {}", r.name, tr(lang, "需要处理", "needs attention"))),
         }

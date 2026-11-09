@@ -22,10 +22,24 @@ export function span(ms: number, lang: Lang): string {
   return `${m}m`;
 }
 
-export function countdown(resetsAt: string | null, now: number, lang: Lang, rem?: number | null): string {
+export function countdown(
+  resetsAt: string | null,
+  now: number,
+  lang: Lang,
+  rem?: number | null,
+  w?: QuotaWindow | null,
+): string {
   if (!resetsAt) {
-    if (rem != null && Math.round(rem) >= 100) return lang === "zh" ? "额度充足" : "Full Quota";
-    if (rem != null && Math.round(rem) <= 0) return lang === "zh" ? "当前无配额" : "No Quota";
+    if (rem != null && Math.round(rem) <= 0) return translate(lang, "noQuotaAssigned");
+    if (rem != null && Math.round(rem) >= 100) {
+      if (w?.window_mins === 300 || w?.kind === "session") {
+        return translate(lang, "fullQuotaStartsOnUse");
+      }
+      return translate(lang, "fullQuota");
+    }
+    if (w?.kind === "monthly") {
+      return translate(lang, "activeSubscription");
+    }
     return translate(lang, "resetsUnknown");
   }
   const ms = Date.parse(resetsAt) - now;

@@ -66,11 +66,46 @@ pub fn window_name(w: &QuotaWindow, lang: Lang) -> String {
     }
 }
 
+pub fn countdown_window(w: &QuotaWindow, now: DateTime<Utc>, lang: Lang) -> String {
+    if let Some(at) = w.resets_at {
+        return countdown(Some(at), now, lang);
+    }
+    let rem = w.remaining_percent();
+    if rem <= 0.0 {
+        return match lang {
+            Lang::Zh => "当前账号无配额".into(),
+            Lang::En => "no quota assigned".into(),
+        };
+    }
+    if rem >= 100.0 {
+        if w.window_mins == Some(300) || w.kind == WindowKind::Session {
+            return match lang {
+                Lang::Zh => "额度充足（使用后开始计时）".into(),
+                Lang::En => "full quota (starts on use)".into(),
+            };
+        }
+        return match lang {
+            Lang::Zh => "额度充足".into(),
+            Lang::En => "full quota".into(),
+        };
+    }
+    if w.kind == WindowKind::Monthly {
+        return match lang {
+            Lang::Zh => "随订阅周期生效".into(),
+            Lang::En => "active subscription".into(),
+        };
+    }
+    match lang {
+        Lang::Zh => "官方未提供倒计时".into(),
+        Lang::En => "no countdown provided".into(),
+    }
+}
+
 pub fn countdown(resets_at: Option<DateTime<Utc>>, now: DateTime<Utc>, lang: Lang) -> String {
     let Some(at) = resets_at else {
         return match lang {
-            Lang::Zh => "重置时间未知".into(),
-            Lang::En => "reset time unknown".into(),
+            Lang::Zh => "随周期生效".into(),
+            Lang::En => "active".into(),
         };
     };
     let secs = (at - now).num_seconds();
@@ -113,8 +148,17 @@ mod tests {
         assert_eq!(countdown(at(2 * 86400 + 30), now, Lang::Zh), "还有 2 天");
         assert_eq!(countdown(at(30), now, Lang::Zh), "即将重置");
         assert_eq!(countdown(at(-5), now, Lang::Zh), "已重置");
-        assert_eq!(countdown(None, now, Lang::Zh), "重置时间未知");
+        assert_eq!(countdown(None, now, Lang::Zh), "随周期生效");
         assert_eq!(countdown(at(90 * 60), now, Lang::En), "resets in 1h 30m");
+
+        let w_session_full = QuotaWindow::new("test", Some(300), 0.0);
+        assert_eq!(countdown_window(&w_session_full, now, Lang::Zh), "额度充足（使用后开始计时）");
+
+        let w_no_quota = QuotaWindow::new("test", Some(10080), 100.0);
+        assert_eq!(countdown_window(&w_no_quota, now, Lang::Zh), "当前账号无配额");
+
+        let w_monthly = QuotaWindow::new("test", None, 10.0).kind(WindowKind::Monthly);
+        assert_eq!(countdown_window(&w_monthly, now, Lang::Zh), "随订阅周期生效");
     }
 
     #[test]
