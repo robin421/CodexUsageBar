@@ -12,16 +12,22 @@
     thresholds,
     lang,
     now,
+    accounts = [],
     selectedAccount = null,
-    selectedFilter = "all",
+    activeAgyAccount = null,
+    onSelectAccount,
+    onSwitchAccount,
     onRetry,
   }: {
     report: ProviderReport;
     thresholds: Thresholds;
     lang: Lang;
     now: number;
+    accounts?: string[];
     selectedAccount?: string | null;
-    selectedFilter?: string;
+    activeAgyAccount?: string | null;
+    onSelectAccount?: (email: string) => void;
+    onSwitchAccount?: (email: string) => void;
     onRetry: () => void;
   } = $props();
 
@@ -35,21 +41,6 @@
       const short = selectedAccount.split("@")[0];
       list = list.filter((w) => w.account === selectedAccount || w.scope?.includes(short));
     }
-    // If a specific model is selected, filter to that model
-    let modelKeyword: string | null = null;
-    if (selectedFilter.includes("#")) {
-      const modelPart = selectedFilter.split("#")[1];
-      if (modelPart.includes("flash") || modelPart.includes("3.8")) modelKeyword = "3.8 Flash";
-      else if (modelPart.includes("argon")) modelKeyword = "Argon";
-      else if (modelPart.includes("claude") || modelPart.includes("gpt")) modelKeyword = "Claude";
-    } else if (["gemini-flash", "argon-4", "claude-gpt"].includes(selectedFilter)) {
-      if (selectedFilter === "gemini-flash") modelKeyword = "3.8 Flash";
-      else if (selectedFilter === "argon-4") modelKeyword = "Argon";
-      else if (selectedFilter === "claude-gpt") modelKeyword = "Claude";
-    }
-    if (modelKeyword) {
-      list = list.filter((w) => w.scope?.includes(modelKeyword!));
-    }
     return list;
   });
 
@@ -58,6 +49,14 @@
     if (!acc) return scope;
     const short = acc.split("@")[0];
     return scope.replace(` (${short})`, "").trim();
+  }
+
+  function modelIcon(scope: string | null | undefined): string {
+    if (!scope) return "";
+    if (scope.includes("3.8 Flash") || scope.includes("Flash")) return "⚡";
+    if (scope.includes("Argon")) return "🧪";
+    if (scope.includes("Claude") || scope.includes("GPT")) return "🧠";
+    return "";
   }
 
   async function copy(cmd: string) {
@@ -97,6 +96,7 @@
     <div class="ident">
       <h3 id="p-{report.id}">
         {report.name}
+        {#if snap?.plan}<span class="plan-badge">{snap.plan}</span>{/if}
         {#if report.beta}<span class="beta">{$t("beta")}</span>{/if}
       </h3>
       {#if report.id === "agy" && selectedAccount}
@@ -105,7 +105,38 @@
         <span class="account" title={snap.account}>{snap.account}</span>
       {/if}
     </div>
-    {#if snap?.plan}<span class="plan">{snap.plan}</span>{/if}
+
+    {#if report.id === "agy" && accounts.length > 1}
+      <div class="account-switcher">
+        {#each accounts as acc (acc)}
+          {@const isCurActive = activeAgyAccount === acc}
+          {@const isSelected = selectedAccount === acc}
+          <button
+            type="button"
+            class="acc-chip"
+            class:selected={isSelected}
+            class:is-active-cli={isCurActive}
+            onclick={() => onSelectAccount?.(acc)}
+            title="{acc} {isCurActive ? (lang === 'zh' ? '(当前CLI活动账号)' : '(Current CLI active)') : ''}"
+          >
+            <span class="acc-name">{acc.split('@')[0]}</span>
+            {#if isCurActive}<span class="cli-badge" title={lang === 'zh' ? '当前CLI账号' : 'Active CLI account'}>CLI</span>{/if}
+          </button>
+        {/each}
+        {#if onSwitchAccount && selectedAccount && activeAgyAccount !== selectedAccount}
+          <button
+            type="button"
+            class="btn-set-active"
+            onclick={() => onSwitchAccount?.(selectedAccount!)}
+            title={lang === "zh" ? "设为当前 CLI 活动账号" : "Set as active CLI account"}
+          >
+            {lang === "zh" ? "设为活动" : "Set Active"}
+          </button>
+        {/if}
+      </div>
+    {:else if snap?.plan}
+      <span class="plan">{snap.plan}</span>
+    {/if}
   </header>
 
   {#if report.status === "stale" && report.issue}
@@ -129,13 +160,18 @@
       <div class="window" data-level={level}>
         <div class="row">
           <span class="name">
-            {windowName(w, lang)}
-            {#if cleanedScope}<span class="scope">{cleanedScope}</span>{/if}
+            {#if modelIcon(w.scope)}
+              <span class="model-emoji">{modelIcon(w.scope)}</span>
+            {/if}
+            {#if cleanedScope}
+              <span class="model-title">{cleanedScope}</span>
+            {/if}
+            <span class="window-kind">{windowName(w, lang)}</span>
           </span>
           {#if ahead}<span class="pace">{$t("aheadOfPace")}</span>{/if}
           <span class="pct">{Math.round(rem)}%</span>
         </div>
-        <Meter remaining={rem} {level} {expected} label="{windowName(w, lang)} {cleanedScope}" />
+        <Meter remaining={rem} {level} {expected} label={cleanedScope || windowName(w, lang)} />
         <div class="row sub">
           <span class="when">{countdown(w.resets_at, now, lang, rem)}</span>
           <span class="right">{amt ?? resetClock(w.resets_at, now, lang)}</span>
@@ -175,6 +211,8 @@
 <style>
   .provider {
     padding: var(--s-3) var(--s-4) var(--s-4);
+  }
+  :global(.provider + .provider) {
     border-top: 1px solid var(--line);
   }
   header {
@@ -206,6 +244,71 @@
     font-weight: 500;
     line-height: 14px;
     color: var(--ink-3);
+  }
+  .plan-badge {
+    padding: 0 5px;
+    border-radius: var(--r-sm);
+    background: var(--inset);
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 16px;
+    color: var(--ink-2);
+  }
+  .account-switcher {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+  }
+  .acc-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 7px;
+    border-radius: var(--r-sm);
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink-2);
+    font-size: var(--fs-xs);
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .acc-chip:hover {
+    border-color: var(--line-strong);
+    color: var(--ink);
+  }
+  .acc-chip.selected {
+    background: var(--ink);
+    color: var(--paper);
+    border-color: var(--ink);
+  }
+  .cli-badge {
+    padding: 0 3px;
+    border-radius: 2px;
+    background: var(--ink-3);
+    color: var(--paper);
+    font-size: 9px;
+    font-weight: 600;
+    line-height: 12px;
+  }
+  .acc-chip.selected .cli-badge {
+    background: var(--paper);
+    color: var(--ink);
+  }
+  .btn-set-active {
+    padding: 2px 6px;
+    border-radius: var(--r-sm);
+    border: 1px dashed var(--line-strong);
+    background: transparent;
+    color: var(--ink-3);
+    font-size: 10px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .btn-set-active:hover {
+    border-color: var(--ink-2);
+    color: var(--ink);
   }
   .account {
     overflow: hidden;
@@ -260,16 +363,22 @@
     font-size: var(--fs-sm);
     color: var(--ink-2);
   }
-  .scope {
+  .model-emoji {
+    font-size: 13px;
+    line-height: 1;
+    flex: none;
+  }
+  .model-title {
+    font-weight: 600;
+    color: var(--ink);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    padding: 0 5px;
-    border-radius: var(--r-sm);
-    background: var(--inset);
+  }
+  .window-kind {
+    color: var(--ink-3);
     font-size: var(--fs-xs);
-    font-weight: 500;
-    color: var(--ink);
+    white-space: nowrap;
   }
   .pace {
     font-size: var(--fs-xs);

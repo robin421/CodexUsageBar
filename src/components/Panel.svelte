@@ -1,6 +1,5 @@
 <script lang="ts">
   import BrandMark from "./BrandMark.svelte";
-  import Hero from "./Hero.svelte";
   import Icon from "./Icon.svelte";
   import ProviderSection from "./ProviderSection.svelte";
   import { api } from "../lib/api";
@@ -38,14 +37,7 @@
     return Array.from(accs);
   });
 
-  let selectedFilter = $state<string>("all");
   let selectedAccount = $state<string | null>(null);
-
-  $effect(() => {
-    if (snap.active_filter) {
-      selectedFilter = snap.active_filter;
-    }
-  });
 
   $effect(() => {
     if (!selectedAccount && agyAccounts.length > 0) {
@@ -58,35 +50,17 @@
   });
 
   $effect(() => {
-    if (selectedFilter.startsWith("account:")) {
-      const email = selectedFilter.replace("account:", "").split("#")[0];
+    if (snap.active_filter && snap.active_filter.startsWith("account:")) {
+      const email = snap.active_filter.replace("account:", "").split("#")[0];
       if (email && email !== selectedAccount) {
         selectedAccount = email;
       }
     }
   });
 
-  const filteredOrdered = $derived.by(() => {
-    if (selectedFilter === "all") return ordered;
-    if (selectedFilter === "codex") return ordered.filter((r) => r.id === "codex");
-    if (selectedFilter === "grok") return ordered.filter((r) => r.id === "grok");
-    if (
-      selectedFilter === "agy" ||
-      selectedFilter.startsWith("account:") ||
-      ["gemini-flash", "argon-4", "claude-gpt"].includes(selectedFilter)
-    ) {
-      return ordered.filter((r) => r.id === "agy");
-    }
-    return ordered.filter((r) => r.id === selectedFilter);
-  });
-
-  function handleSelectFilter(id: string) {
-    selectedFilter = id;
-    api.setActiveFilter(id);
-  }
-
   function handleSelectAccount(email: string) {
     selectedAccount = email;
+    api.setActiveFilter(`account:${email}`);
   }
 
   function handleSwitchAccount(email: string) {
@@ -144,30 +118,18 @@
         <button class="btn primary" onclick={() => api.openSettings()}><Icon name="key" size={14} />{$t("addKey")}</button>
       </div>
     {:else}
-      <div class="hero-wrap">
-        <Hero
-          overview={snap.overview}
-          reports={visible}
-          {thresholds}
-          {lang}
-          now={$now}
-          {selectedFilter}
-          {selectedAccount}
-          activeAgyAccount={snap.active_agy_account}
-          onSelectFilter={handleSelectFilter}
-          onSelectAccount={handleSelectAccount}
-          onSwitchAccount={handleSwitchAccount}
-        />
-      </div>
       <div class="list">
-        {#each filteredOrdered as report (report.id)}
+        {#each ordered as report (report.id)}
           <ProviderSection
             {report}
             {thresholds}
             {lang}
             now={$now}
+            accounts={report.id === "agy" ? agyAccounts : []}
             {selectedAccount}
-            {selectedFilter}
+            activeAgyAccount={snap.active_agy_account}
+            onSelectAccount={handleSelectAccount}
+            onSwitchAccount={handleSwitchAccount}
             onRetry={refresh}
           />
         {/each}
@@ -221,11 +183,9 @@
     overflow-y: auto;
     overscroll-behavior: contain;
   }
-  .hero-wrap {
-    padding-bottom: var(--s-3);
-  }
   .list {
     background: var(--surface);
+    border-top: 1px solid var(--line);
     border-bottom: 1px solid var(--line);
   }
   footer {
