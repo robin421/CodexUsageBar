@@ -9,8 +9,12 @@ const zh = {
   settings: "设置…",
   quit: "退出",
   remaining: "剩余",
+  used: "已用",
+  usedPct: "已用 {pct}%",
   lowestLabel: "余量最低",
   resetsIn: "{span}后重置",
+  resetsAtPrefix: "重置于 {time}",
+  pacePrefix: "配速 {pace}",
   resetsUnknown: "官方未提供倒计时",
   fullQuotaStartsOnUse: "额度充足（使用后开始计时）",
   fullQuota: "额度充足",
@@ -103,6 +107,14 @@ const zh = {
   cacheDir: "缓存目录",
   none: "未检测到",
   privacy: "隐私：本应用只读取本机已有的登录信息，直接请求各服务商的官方接口，不经过任何第三方服务器。",
+  // Deals & Growth
+  dealAlert: "⚡ 低价补额度 ↗",
+  dealNoSub: "优惠订阅攻略 ↗",
+  dealFooter: "AI 订阅比价",
+  dealFooterTip: "全球 AI 订阅最低价查询 (AISubDeal.com)",
+  dealSettingsTitle: "AISubDeal · 全球 AI 订阅省钱指南",
+  dealSettingsDesc: "实时对比 ChatGPT、Claude、Cursor 等全球各区最低定价与防封攻略。",
+  dealExplore: "前往探索 ↗",
 };
 
 type Dict = typeof zh;
@@ -115,8 +127,12 @@ const en: Dict = {
   settings: "Settings…",
   quit: "Quit",
   remaining: "left",
+  used: "Used",
+  usedPct: "{pct}% used",
   lowestLabel: "Lowest remaining",
   resetsIn: "resets in {span}",
+  resetsAtPrefix: "Resets {time}",
+  pacePrefix: "Pace {pace}",
   resetsUnknown: "No countdown provided",
   fullQuotaStartsOnUse: "Full quota (timer starts on use)",
   fullQuota: "Full quota",
@@ -207,6 +223,14 @@ const en: Dict = {
   cacheDir: "Cache folder",
   none: "Not found",
   privacy: "Privacy: the app only reads logins already on this machine and talks directly to each provider's official API. No third-party servers.",
+  // Deals & Growth
+  dealAlert: "⚡ Running low? Best deals ↗",
+  dealNoSub: "Discount Guide ↗",
+  dealFooter: "AI Deals",
+  dealFooterTip: "Find lowest AI subscription prices worldwide (AISubDeal.com)",
+  dealSettingsTitle: "AISubDeal · Global AI Subscription Deals",
+  dealSettingsDesc: "Track real-time pricing and deals for ChatGPT, Claude, Cursor and more across 40+ countries.",
+  dealExplore: "Explore ↗",
 };
 
 export type Key = keyof Dict;

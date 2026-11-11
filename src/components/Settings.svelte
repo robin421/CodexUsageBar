@@ -7,10 +7,12 @@
   import { api } from "../lib/api";
   import { ENV_KEYS } from "../lib/format";
   import { t, type Key } from "../lib/i18n";
+  import { getDealUrl } from "../lib/affiliate";
   import type { AppSnapshot, DiagnosticEntry, DisplayMode, ProviderId, ProviderReport, SettingsPatch } from "../lib/types";
 
   let { snap }: { snap: AppSnapshot } = $props();
   const s = $derived(snap.settings);
+  const lang = $derived(snap.settings.resolved_language);
 
   type Tab = "general" | "providers" | "alerts" | "advanced";
   const tabs: { id: Tab; label: Key; icon: IconName }[] = [
@@ -133,6 +135,23 @@
             {/each}
           </div>
         </div>
+      </div>
+
+      <div class="deal-card">
+        <div class="deal-card-content">
+          <div class="deal-card-header">
+            <Icon name="sparkles" size={15} />
+            <span class="deal-card-title">{$t("dealSettingsTitle")}</span>
+          </div>
+          <p class="deal-card-desc">{$t("dealSettingsDesc")}</p>
+        </div>
+        <button
+          type="button"
+          class="btn deal-btn"
+          onclick={() => api.openUrl(getDealUrl('global', 'settings', lang))}
+        >
+          {$t("dealExplore")}
+        </button>
       </div>
     {:else if tab === "providers"}
       <h1>{$t("tabProviders")}</h1>
@@ -417,4 +436,59 @@
   }
   .diag dd.missing { color: var(--ink-3); direction: ltr; }
   .privacy { margin: 0; max-width: 60ch; line-height: var(--lh); }
+  .deal-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s-4);
+    margin: var(--s-5) 0 0;
+    padding: var(--s-4);
+    border: 1px solid var(--line);
+    border-radius: var(--r-lg);
+    background: var(--surface);
+    transition: border-color var(--dur-fast) var(--ease), box-shadow var(--dur-fast) var(--ease);
+  }
+  .deal-card:hover {
+    border-color: var(--line-strong);
+    box-shadow: var(--shadow-pop);
+  }
+  .deal-card-content {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+  .deal-card-header {
+    display: flex;
+    align-items: center;
+    gap: var(--s-2);
+    font-weight: 600;
+    font-size: var(--fs-md);
+    color: var(--ink);
+  }
+  .deal-card-header :global(svg) {
+    color: var(--warn);
+    flex-shrink: 0;
+  }
+  .deal-card-desc {
+    margin: 0;
+    font-size: var(--fs-xs);
+    color: var(--ink-2);
+    line-height: var(--lh);
+  }
+  .deal-btn {
+    flex-shrink: 0;
+    height: 32px;
+    padding: 0 var(--s-3);
+    border-color: var(--line-strong);
+    background: var(--inset);
+    color: var(--ink);
+    font-size: var(--fs-sm);
+    font-weight: 500;
+  }
+  .deal-btn:hover {
+    background: var(--paper);
+    color: var(--ink);
+    border-color: var(--ink-3);
+  }
 </style>

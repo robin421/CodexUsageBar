@@ -2,9 +2,10 @@
   import Icon from "./Icon.svelte";
   import Meter from "./Meter.svelte";
   import Monogram from "./Monogram.svelte";
-  import { amounts, countdown, levelOf, money, remaining, resetClock, windowName } from "../lib/format";
+  import { amounts, formatSubLine, levelOf, money, windowName } from "../lib/format";
   import { t } from "../lib/i18n";
   import { api } from "../lib/api";
+  import { getDealUrl } from "../lib/affiliate";
   import type { Issue, Lang, ProviderReport, Thresholds } from "../lib/types";
 
   let {
@@ -44,19 +45,17 @@
     return list;
   });
 
+  const currentAccount = $derived(
+    report.id === "agy" && selectedAccount && selectedAccount !== "all"
+      ? selectedAccount
+      : (snap?.account || null)
+  );
+
   function cleanScope(scope: string | null | undefined, acc: string | null): string {
     if (!scope) return "";
     if (!acc) return scope;
     const short = acc.split("@")[0];
     return scope.replace(` (${short})`, "").trim();
-  }
-
-  function modelIcon(scope: string | null | undefined): string {
-    if (!scope) return "";
-    if (scope.includes("3.8 Flash") || scope.includes("Flash")) return "⚡";
-    if (scope.includes("Argon")) return "🧪";
-    if (scope.includes("Claude") || scope.includes("GPT")) return "🧠";
-    return "";
   }
 
   async function copy(cmd: string) {
@@ -92,40 +91,41 @@
 
 <section class="provider" aria-labelledby="p-{report.id}">
   <header>
-    <Monogram id={report.id} />
-    <div class="ident">
-      <h3 id="p-{report.id}">
-        {report.name}
-        {#if snap?.plan}<span class="plan-badge">{snap.plan}</span>{/if}
-        {#if report.beta}<span class="beta">{$t("beta")}</span>{/if}
-      </h3>
-      {#if report.id === "agy" && selectedAccount}
-        <span class="account" title={selectedAccount}>{selectedAccount}</span>
-      {:else if snap?.account}
-        <span class="account" title={snap.account}>{snap.account}</span>
+    <div class="header-content">
+      <div class="service-row">
+        <Monogram id={report.id} />
+        <h3 id="p-{report.id}">
+          {report.name}
+          {#if snap?.plan}<span class="plan-badge">{snap.plan}</span>{/if}
+          {#if report.beta}<span class="beta">{$t("beta")}</span>{/if}
+        </h3>
+
+        {#if report.id === "agy" && accounts.length > 1}
+          <div class="account-switcher" role="tablist">
+            {#each accounts as acc (acc)}
+              {@const isSelected = selectedAccount === acc}
+              <button
+                type="button"
+                class="acc-chip"
+                class:selected={isSelected}
+                role="tab"
+                aria-selected={isSelected}
+                onclick={() => onSelectAccount?.(acc)}
+                title={acc}
+              >
+                {acc.split('@')[0]}
+              </button>
+            {/each}
+          </div>
+        {/if}
+      </div>
+
+      {#if currentAccount}
+        <div class="account-row">
+          <span class="account" title={currentAccount}>{currentAccount}</span>
+        </div>
       {/if}
     </div>
-
-    {#if report.id === "agy" && accounts.length > 1}
-      <div class="account-switcher" role="tablist">
-        {#each accounts as acc (acc)}
-          {@const isSelected = selectedAccount === acc}
-          <button
-            type="button"
-            class="acc-chip"
-            class:selected={isSelected}
-            role="tab"
-            aria-selected={isSelected}
-            onclick={() => onSelectAccount?.(acc)}
-            title={acc}
-          >
-            {acc.split('@')[0]}
-          </button>
-        {/each}
-      </div>
-    {:else if snap?.plan}
-      <span class="plan">{snap.plan}</span>
-    {/if}
   </header>
 
   {#if report.status === "stale" && report.issue}
@@ -140,27 +140,35 @@
       <p class="muted">{$t("noWindows")}</p>
     {/if}
     {#each displayWindows as w (w.id)}
-      {@const rem = remaining(w)}
       {@const level = levelOf(w, thresholds)}
       {@const amt = amounts(w, lang)}
       {@const cleanedScope = cleanScope(w.scope, report.id === "agy" ? selectedAccount : null)}
       <div class="window" data-level={level}>
         <div class="row">
           <span class="name">
-            {#if modelIcon(w.scope)}
-              <span class="model-emoji">{modelIcon(w.scope)}</span>
-            {/if}
             {#if cleanedScope}
               <span class="model-title">{cleanedScope}</span>
             {/if}
             <span class="window-kind">{windowName(w, lang)}</span>
           </span>
-          <span class="pct">{Math.round(rem)}%</span>
+          <span class="pct">{$t("usedPct", { pct: Math.round(w.used_percent) })}</span>
         </div>
-        <Meter remaining={rem} {level} label={cleanedScope || windowName(w, lang)} />
+        <Meter used={w.used_percent} {level} label={cleanedScope || windowName(w, lang)} />
         <div class="row sub">
-          <span class="when">{countdown(w.resets_at, now, lang, rem, w)}</span>
-          <span class="right">{amt ?? resetClock(w.resets_at, now, lang)}</span>
+          <span class="when">{formatSubLine(w, now, lang)}</span>
+          {#if w.used_percent >= 80}
+            <button
+              type="button"
+              class="deal-alert-link"
+              onclick={() => api.openUrl(getDealUrl(report.id, 'quota_alert', lang, { usedPercent: w.used_percent, scope: w.scope ?? undefined }))}
+              title={$t("dealAlert")}
+            >
+              {$t("dealAlert")}
+            </button>
+          {/if}
+          {#if amt}
+            <span class="right">{amt}</span>
+          {/if}
         </div>
       </div>
     {/each}
@@ -189,6 +197,11 @@
         {:else}
           <button class="btn quiet" onclick={() => api.openUrl(report.dashboard_url)}>{$t("openDashboard")}</button>
         {/if}
+        {#if report.issue.kind === "unsupported" && report.issue.reason === "no_subscription"}
+          <button class="btn quiet" onclick={() => api.openUrl(getDealUrl(report.id, 'no_subscription', lang))}>
+            <Icon name="tag" size={13} />{$t("dealNoSub")}
+          </button>
+        {/if}
       </div>
     </div>
   {/if}
@@ -202,16 +215,24 @@
     border-top: 1px solid var(--line);
   }
   header {
+    margin-bottom: var(--s-3);
+  }
+  .header-content {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+  .service-row {
     display: flex;
     align-items: center;
     gap: var(--s-2);
-    margin-bottom: var(--s-3);
-  }
-  .ident {
     min-width: 0;
-    flex: 1;
+  }
+  .account-row {
     display: flex;
-    flex-direction: column;
+    align-items: center;
+    padding-left: 0;
+    min-width: 0;
   }
   h3 {
     display: flex;
@@ -273,14 +294,9 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: var(--fs-xs);
-    color: var(--ink-3);
-  }
-  .plan {
-    flex: none;
-    font-size: var(--fs-xs);
-    font-weight: 500;
+    font-size: var(--fs-sm);
     color: var(--ink-2);
+    line-height: var(--lh-tight);
   }
   .stale {
     display: flex;
@@ -322,11 +338,6 @@
     font-size: var(--fs-sm);
     color: var(--ink-2);
   }
-  .model-emoji {
-    font-size: 13px;
-    line-height: 1;
-    flex: none;
-  }
   .model-title {
     font-weight: 600;
     color: var(--ink);
@@ -352,6 +363,31 @@
   .when {
     flex: 1;
     color: var(--ink-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .deal-alert-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    font-family: inherit;
+    font-size: var(--fs-xs);
+    color: var(--warn);
+    white-space: nowrap;
+    cursor: pointer;
+    line-height: inherit;
+    transition: opacity var(--dur-fast) var(--ease);
+  }
+  .deal-alert-link:hover {
+    text-decoration: underline;
+    opacity: 0.85;
+  }
+  [data-level="critical"] .deal-alert-link {
+    color: var(--crit);
   }
   .right {
     color: var(--ink-3);

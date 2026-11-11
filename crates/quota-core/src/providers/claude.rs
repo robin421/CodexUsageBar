@@ -44,11 +44,14 @@ fn config_dir(ctx: &Ctx) -> PathBuf {
 }
 
 async fn load_credentials(ctx: &Ctx) -> Result<Value> {
-    let file = config_dir(ctx).join(".credentials.json");
-    match read_json(&file) {
-        Ok(v) => return Ok(v),
-        Err(FetchError::NotDetected) => {}
-        Err(e) => return Err(e),
+    let base = config_dir(ctx);
+    for name in [".credentials.json", "credentials.json"] {
+        let file = base.join(name);
+        match read_json(&file) {
+            Ok(v) => return Ok(v),
+            Err(FetchError::NotDetected) => {}
+            Err(e) => return Err(e),
+        }
     }
     if cfg!(target_os = "macos") {
         let out = ctx
@@ -136,5 +139,24 @@ mod tests {
     #[test]
     fn rejects_empty() {
         assert!(parse_usage(&json!({"five_hour": null})).is_err());
+    }
+
+    #[tokio::test]
+    async fn loads_undotted_credentials_file() {
+        let temp = tempfile::tempdir().unwrap();
+        let cred_file = temp.path().join("credentials.json");
+        std::fs::write(&cred_file, r#"{"claudeAiOauth": {"accessToken": "tok_xyz", "expiresAt": 9999999999999}}"#).unwrap();
+
+        let mut env = std::collections::HashMap::new();
+        env.insert("CLAUDE_CONFIG_DIR".into(), temp.path().to_str().unwrap().into());
+        let ctx = Ctx::with(
+            temp.path().to_path_buf(),
+            env,
+            std::collections::HashMap::new(),
+            std::ffi::OsString::new(),
+        );
+
+        let creds = load_credentials(&ctx).await.unwrap();
+        assert_eq!(creds["claudeAiOauth"]["accessToken"], "tok_xyz");
     }
 }

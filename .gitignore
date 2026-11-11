@@ -1,11 +1,21 @@
+# macOS metadata and AppleDouble files
 .DS_Store
 ._*
+**/.DS_Store
+**/._*
+.Spotlight-V100
+.Trashes
+
+# Build outputs
+target/
+tauri-target/
 build/
 dist/
 DerivedData/
 *.xcuserstate
 xcuserdata/
 node_modules/
-target/
 src-tauri/gen/
 *.dmg
+*.tmp
+*.log

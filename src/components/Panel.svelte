@@ -6,6 +6,7 @@
   import { now } from "../lib/clock";
   import { hhmm } from "../lib/format";
   import { t } from "../lib/i18n";
+  import { getDealUrl } from "../lib/affiliate";
   import type { AppSnapshot, ProviderReport } from "../lib/types";
 
   let { snap }: { snap: AppSnapshot } = $props();
@@ -15,7 +16,7 @@
 
   const visible = $derived(
     snap.reports.filter(
-      (r) => r.status !== "disabled" && !(r.issue && (r.issue.kind === "not_detected" || r.issue.kind === "missing_key" || (r.issue.kind === "unsupported" && r.issue.reason === "no_subscription"))),
+      (r) => r.status !== "disabled" && !(r.issue && (r.issue.kind === "not_detected" || r.issue.kind === "missing_key")),
     ),
   );
   // Providers with numbers first, in a stable order; ones needing attention after.
@@ -140,6 +141,14 @@
 
   <footer>
     <button class="btn quiet" onclick={() => api.openSettings()}><Icon name="settings" size={14} />{$t("settings")}</button>
+    <button
+      class="btn quiet deal-btn"
+      onclick={() => api.openUrl(getDealUrl('global', 'footer', lang))}
+      title={$t("dealFooterTip")}
+      aria-label={$t("dealFooterTip")}
+    >
+      <Icon name="tag" size={14} />{$t("dealFooter")}
+    </button>
     <button class="btn quiet" onclick={() => api.quit()}><Icon name="power" size={14} />{$t("quit")}</button>
   </footer>
 </div>
@@ -197,6 +206,14 @@
     padding: 0 var(--s-2);
     border-top: 1px solid var(--line);
     background: var(--paper);
+  }
+  .deal-btn {
+    font-size: var(--fs-xs);
+    gap: var(--s-1);
+    color: var(--ink-2);
+  }
+  .deal-btn:hover {
+    color: var(--ink);
   }
   .state {
     display: flex;

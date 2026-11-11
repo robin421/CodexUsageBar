@@ -29,10 +29,11 @@ fn set_active_filter(app: AppHandle, filter: String) -> AppSnapshot {
 async fn switch_agy_account(app: AppHandle, email: String) -> AppSnapshot {
     if let Some(home) = dirs::home_dir() {
         let path = home.join(".gemini/google_accounts.json");
-        let payload = serde_json::json!({
-            "active": email,
-            "old": []
-        });
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let existing = std::fs::read_to_string(&path).ok();
+        let payload = quota_core::providers::agy::update_accounts_payload(existing.as_deref(), &email);
         let _ = std::fs::write(path, serde_json::to_string_pretty(&payload).unwrap_or_default());
     }
     state::refresh(app.clone()).await;

@@ -623,12 +623,59 @@ pub fn parse_quota_summary(body: &Value) -> Result<Snapshot> {
     Ok(snap)
 }
 
+pub fn update_accounts_payload(existing_json: Option<&str>, new_email: &str) -> Value {
+    let mut old_accounts: Vec<String> = Vec::new();
+    let mut prev_active: Option<String> = None;
+
+    if let Some(content) = existing_json {
+        if let Ok(v) = serde_json::from_str::<Value>(content) {
+            if let Some(act) = v.get("active").and_then(|a| a.as_str()) {
+                let trimmed = act.trim();
+                if !trimmed.is_empty() {
+                    prev_active = Some(trimmed.to_string());
+                }
+            }
+            if let Some(arr) = v.get("old").and_then(|o| o.as_array()) {
+                for item in arr {
+                    if let Some(s) = item.as_str() {
+                        let trimmed = s.trim();
+                        if !trimmed.is_empty() {
+                            old_accounts.push(trimmed.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if let Some(prev) = prev_active {
+        if prev != new_email {
+            old_accounts.insert(0, prev);
+        }
+    }
+
+    let mut deduped_old = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    seen.insert(new_email.to_string());
+    for acc in old_accounts {
+        if seen.insert(acc.clone()) {
+            deduped_old.push(acc);
+        }
+    }
+
+    serde_json::json!({
+        "active": new_email,
+        "old": deduped_old
+    })
+}
+
 pub fn switch_active_account(ctx: &Ctx, email: &str) -> std::io::Result<()> {
     let path = ctx.home.join(".gemini/google_accounts.json");
-    let payload = serde_json::json!({
-        "active": email,
-        "old": []
-    });
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let existing = std::fs::read_to_string(&path).ok();
+    let payload = update_accounts_payload(existing.as_deref(), email);
     std::fs::write(path, serde_json::to_string_pretty(&payload)?)
 }
 
@@ -771,5 +818,49 @@ mod tests {
         let argon = snap.windows.iter().find(|w| w.scope.as_deref() == Some("Argon 4 (robin421)")).expect("argon present");
         assert_eq!(argon.remaining_percent(), 0.0, "missing argon should have 0% remaining");
         assert!(argon.resets_at.is_none(), "unallocated argon should have no reset time");
+    }
+
+    #[test]
+    fn update_accounts_payload_initial_creation() {
+        let payload = update_accounts_payload(None, "user1@example.com");
+        assert_eq!(payload["active"], "user1@example.com");
+        assert_eq!(payload["old"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn update_accounts_payload_preserves_old_history() {
+        let existing = r#"{
+            "active": "user1@example.com",
+            "old": ["user2@example.com", "user3@example.com"]
+        }"#;
+        let payload = update_accounts_payload(Some(existing), "user4@example.com");
+        assert_eq!(payload["active"], "user4@example.com");
+        let old: Vec<String> = serde_json::from_value(payload["old"].clone()).unwrap();
+        assert_eq!(old, vec!["user1@example.com", "user2@example.com", "user3@example.com"]);
+    }
+
+    #[test]
+    fn update_accounts_payload_switching_to_existing_old() {
+        let existing = r#"{
+            "active": "user1@example.com",
+            "old": ["user2@example.com", "user3@example.com"]
+        }"#;
+        let payload = update_accounts_payload(Some(existing), "user2@example.com");
+        assert_eq!(payload["active"], "user2@example.com");
+        let old: Vec<String> = serde_json::from_value(payload["old"].clone()).unwrap();
+        // user2 is now active, so old contains user1 and user3, without user2
+        assert_eq!(old, vec!["user1@example.com", "user3@example.com"]);
+    }
+
+    #[test]
+    fn update_accounts_payload_same_account_noop() {
+        let existing = r#"{
+            "active": "user1@example.com",
+            "old": ["user2@example.com"]
+        }"#;
+        let payload = update_accounts_payload(Some(existing), "user1@example.com");
+        assert_eq!(payload["active"], "user1@example.com");
+        let old: Vec<String> = serde_json::from_value(payload["old"].clone()).unwrap();
+        assert_eq!(old, vec!["user2@example.com"]);
     }
 }

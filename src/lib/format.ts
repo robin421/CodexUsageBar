@@ -65,17 +65,173 @@ export function resetClock(resetsAt: string | null, now: number, lang: Lang): st
   return `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${hm}`;
 }
 
-/** "5 小时额度", "每周额度", with the model/feature scope shown separately by the caller. */
+/** "5 小时", "7 天", "24 小时", "月度" */
 export function windowName(w: QuotaWindow, lang: Lang): string {
   const zh = lang === "zh";
-  if (w.window_mins === 300) return zh ? "5 小时额度" : "5-hour limit";
-  switch (w.kind) {
-    case "weekly": return zh ? "每周额度" : "Weekly limit";
-    case "daily": return zh ? "每日额度" : "Daily limit";
-    case "monthly": return zh ? "每月额度" : "Monthly limit";
+  if (w.window_mins === 300) return zh ? "5 小时" : "5 hours";
+  if (w.window_mins === 1440 || w.kind === "daily") return zh ? "24 小时" : "24 hours";
+  if (w.window_mins === 10080 || w.kind === "weekly") return zh ? "7 天" : "7 days";
+  if (w.kind === "monthly") return zh ? "月度" : "Monthly";
+  if (w.window_mins) {
+    if (w.window_mins >= 1440 && w.window_mins % 1440 === 0) {
+      const days = w.window_mins / 1440;
+      return zh ? `${days} 天` : `${days} ${days === 1 ? "day" : "days"}`;
+    }
+    if (w.window_mins % 60 === 0) {
+      const hrs = w.window_mins / 60;
+      return zh ? `${hrs} 小时` : `${hrs} ${hrs === 1 ? "hour" : "hours"}`;
+    }
+    return zh ? `${w.window_mins} 分钟` : `${w.window_mins} mins`;
   }
-  if (w.window_mins && w.window_mins % 60 === 0) return zh ? `${w.window_mins / 60} 小时额度` : `${w.window_mins / 60}-hour limit`;
-  return zh ? "额度窗口" : "Usage limit";
+  if (w.kind === "session") return zh ? "单次会话" : "Session";
+  return zh ? "周期额度" : "Limit";
+}
+
+/**
+ * Absolute reset time formatted for subline or display:
+ * "今天 13:08", "明天 13:08", "周日 13:08", "4月12日 13:08".
+ */
+export function formatResetAt(resetsAt: string | null, now: number, lang: Lang): string | null {
+  if (!resetsAt) return null;
+  const t = Date.parse(resetsAt);
+  if (Number.isNaN(t)) return null;
+  const d = new Date(t);
+  const nowD = new Date(now);
+
+  const targetMidnight = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const nowMidnight = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate()).getTime();
+  const dayDiff = Math.round((targetMidnight - nowMidnight) / 86_400_000);
+
+  const hm = d.toLocaleTimeString(lang === "zh" ? "zh-CN" : "en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+
+  const zh = lang === "zh";
+
+  if (dayDiff === 0) return zh ? `今天 ${hm}` : `Today ${hm}`;
+  if (dayDiff === 1) return zh ? `明天 ${hm}` : `Tomorrow ${hm}`;
+  if (dayDiff >= 2 && dayDiff <= 6) {
+    const zhDays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
+    const enDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const dayName = zh ? zhDays[d.getDay()] : enDays[d.getDay()];
+    return `${dayName} ${hm}`;
+  }
+
+  const isSameYear = d.getFullYear() === nowD.getFullYear();
+  if (zh) {
+    return isSameYear
+      ? `${d.getMonth() + 1}月${d.getDate()}日 ${hm}`
+      : `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${hm}`;
+  }
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return isSameYear
+    ? `${monthNames[d.getMonth()]} ${d.getDate()} ${hm}`
+    : `${monthNames[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()} ${hm}`;
+}
+
+/**
+ * Relative countdown formatted concisely:
+ * "4 天后", "3 小时后", "25 分钟后", "即将重置", "已重置".
+ */
+export function formatRelativeCountdown(resetsAt: string | null, now: number, lang: Lang): string | null {
+  if (!resetsAt) return null;
+  const t = Date.parse(resetsAt);
+  if (Number.isNaN(t)) return null;
+  const ms = t - now;
+  const zh = lang === "zh";
+
+  if (ms <= 0) return translate(lang, "resetDone");
+  if (ms < 60_000) return translate(lang, "resetSoon");
+
+  const mins = Math.floor(ms / 60_000);
+  const d = Math.floor(mins / 1440);
+  const h = Math.floor((mins % 1440) / 60);
+  const m = mins % 60;
+
+  if (d > 0) return zh ? `${d} 天后` : `in ${d} ${d === 1 ? "day" : "days"}`;
+  if (h > 0) return zh ? `${h} 小时后` : `in ${h} ${h === 1 ? "hour" : "hours"}`;
+  return zh ? `${m} 分钟后` : `in ${m} ${m === 1 ? "min" : "mins"}`;
+}
+
+/**
+ * Pace calculation:
+ * timeElapsedPct = (1 - (resets_at - now) / window_duration) * 100
+ * pace = Math.round(w.used_percent - timeElapsedPct)
+ */
+export function calcPace(w: QuotaWindow, now: number): number | null {
+  if (!w.resets_at) return null;
+  const resetMs = Date.parse(w.resets_at);
+  if (Number.isNaN(resetMs)) return null;
+
+  let windowMins = w.window_mins;
+  if (!windowMins) {
+    if (w.kind === "weekly") windowMins = 7 * 1440;
+    else if (w.kind === "daily") windowMins = 1440;
+    else if (w.kind === "monthly") windowMins = 30 * 1440;
+  }
+  if (!windowMins || windowMins <= 0) return null;
+
+  const totalMs = windowMins * 60_000;
+  const leftMs = resetMs - now;
+  if (leftMs <= 0) return null;
+
+  const effectiveLeft = Math.max(0, Math.min(totalMs, leftMs));
+  const timeElapsedPct = (1 - effectiveLeft / totalMs) * 100;
+  return Math.round(w.used_percent - timeElapsedPct);
+}
+
+/**
+ * Three-segment subline:
+ * "重置于 周日 13:08 · 4 天后 · 配速 -39%"
+ * Falls back gracefully when resets_at or window duration is missing.
+ */
+export function formatSubLine(w: QuotaWindow, now: number, lang: Lang): string {
+  if (!w.resets_at) {
+    const rem = remaining(w);
+    if (Math.round(rem) <= 0) return translate(lang, "noQuotaAssigned");
+    if (Math.round(rem) >= 100) {
+      if (w.window_mins === 300 || w.kind === "session") {
+        return translate(lang, "fullQuotaStartsOnUse");
+      }
+      return translate(lang, "fullQuota");
+    }
+    if (w.kind === "monthly") {
+      return translate(lang, "activeSubscription");
+    }
+    return translate(lang, "resetsUnknown");
+  }
+
+  const resetMs = Date.parse(w.resets_at);
+  if (Number.isNaN(resetMs)) {
+    return translate(lang, "resetsUnknown");
+  }
+
+  const ms = resetMs - now;
+  if (ms <= 0) {
+    return translate(lang, "resetDone");
+  }
+
+  const parts: string[] = [];
+
+  const clock = formatResetAt(w.resets_at, now, lang);
+  if (clock) {
+    parts.push(translate(lang, "resetsAtPrefix", { time: clock }));
+  }
+
+  const rel = formatRelativeCountdown(w.resets_at, now, lang);
+  if (rel) {
+    parts.push(rel);
+  }
+
+  const pace = calcPace(w, now);
+  if (pace !== null) {
+    const paceStr = pace > 0 ? `+${pace}%` : `${pace}%`;
+    parts.push(translate(lang, "pacePrefix", { pace: paceStr }));
+  }
+
+  return parts.length > 0 ? parts.join(" · ") : countdown(w.resets_at, now, lang, remaining(w), w);
 }
 
 const nf = (lang: Lang, max = 0) => new Intl.NumberFormat(lang === "zh" ? "zh-CN" : "en-US", { maximumFractionDigits: max });

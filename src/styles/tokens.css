@@ -29,7 +29,7 @@
   --r-sm: 4px;
   --r-md: 7px;
   --r-lg: 12px;
-  --meter-h: 6px;
+  --meter-h: 4px;
 
   /* Motion */
   --dur-fast: 120ms;
@@ -47,6 +47,9 @@
   --ink-3: #82878f;
   --on-ink: #ffffff;
 
+  --accent: #4f46e5;
+  --accent-fill: #6366f1;
+  --accent-wash: #eef2ff;
   --ok: #1f9d57;
   --ok-fill: #2fb36b;
   --warn: #b26a00;
@@ -71,6 +74,9 @@
   --ink-3: #757a83;
   --on-ink: #121315;
 
+  --accent: #818cf8;
+  --accent-fill: #6366f1;
+  --accent-wash: #252347;
   --ok: #43c97f;
   --ok-fill: #36bb72;
   --warn: #f5ad3c;

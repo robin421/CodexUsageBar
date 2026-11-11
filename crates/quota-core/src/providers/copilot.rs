@@ -3,6 +3,8 @@
 //! Token sources, in order: Copilot editor plugins (`github-copilot/apps.json`, `hosts.json`),
 //! the GitHub CLI config (`gh/hosts.yml`), then `gh auth token`.
 
+use std::path::PathBuf;
+
 use serde_json::Value;
 
 use crate::ctx::{read_json, send_json, Ctx};
@@ -30,12 +32,26 @@ pub async fn fetch(ctx: &Ctx) -> Result<Snapshot> {
     Ok(snap)
 }
 
-async fn find_token(ctx: &Ctx) -> Option<(String, Option<String>)> {
-    let copilot_dirs = if cfg!(windows) {
-        vec![ctx.local_app_data().join("github-copilot"), ctx.xdg_config().join("github-copilot")]
+fn copilot_search_dirs(ctx: &Ctx) -> Vec<PathBuf> {
+    let mut copilot_dirs = if cfg!(windows) {
+        vec![
+            ctx.local_app_data().join("github-copilot"),
+            ctx.xdg_config().join("github-copilot"),
+        ]
     } else {
-        vec![ctx.xdg_config().join("github-copilot")]
+        vec![
+            ctx.app_config_dir().join("github-copilot"),
+            ctx.home.join(".config/github-copilot"),
+            ctx.xdg_config().join("github-copilot"),
+        ]
     };
+    let mut seen = std::collections::HashSet::new();
+    copilot_dirs.retain(|d| seen.insert(d.clone()));
+    copilot_dirs
+}
+
+async fn find_token(ctx: &Ctx) -> Option<(String, Option<String>)> {
+    let copilot_dirs = copilot_search_dirs(ctx);
     for dir in &copilot_dirs {
         for file in ["apps.json", "hosts.json"] {
             let Ok(v) = read_json(&dir.join(file)) else { continue };
@@ -197,5 +213,28 @@ mod tests {
         let yml = "github.com:\n    users:\n        me:\n            oauth_token: gho_abc\n    oauth_token: gho_abc\n    user: me\n    git_protocol: https\n";
         assert_eq!(parse_hosts_yml(yml), Some(("gho_abc".into(), Some("me".into()))));
         assert_eq!(parse_hosts_yml("github.com:\n    user: me\n"), None);
+    }
+
+    #[test]
+    fn search_dirs_include_macos_app_support_and_config() {
+        let fake_home = PathBuf::from("/test/fake_home");
+        let ctx = Ctx::with(
+            fake_home.clone(),
+            std::collections::HashMap::new(),
+            std::collections::HashMap::new(),
+            std::ffi::OsString::new(),
+        );
+        let dirs = copilot_search_dirs(&ctx);
+        if cfg!(target_os = "macos") {
+            assert!(dirs.contains(&fake_home.join("Library/Application Support/github-copilot")));
+            assert!(dirs.contains(&fake_home.join(".config/github-copilot")));
+        } else if !cfg!(windows) {
+            assert!(dirs.contains(&fake_home.join(".config/github-copilot")));
+        }
+        // Ensure no duplicates
+        let mut set = std::collections::HashSet::new();
+        for d in &dirs {
+            assert!(set.insert(d.clone()), "Duplicate dir found: {:?}", d);
+        }
     }
 }
