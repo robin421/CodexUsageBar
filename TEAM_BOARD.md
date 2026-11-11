@@ -25,6 +25,7 @@
 | **TASK-12** | AISubDeal Web 端额度监控回流触点实现 | Developer | TASK-10 | DONE | `/Volumes/T7 Shield/MyDocument/AI_map` (`components/QuotaCompanionCard.tsx`, `components/product-pricing/ProductPricingView.tsx`, `lib/subscription-tools.ts`, `components/Nav.tsx`, `components/Footer.tsx`) | 1. 新增 `QuotaCompanionCard.tsx`（自适应暗黑模式、中英双语、3 大核心特性、Windows/macOS 自动嗅探 CTA、UTM 跟踪直达 Release）；2. 在 `ProductPricingView.tsx` 支付指导紧邻高转化区集成伴侣卡片；3. `subscription-tools.ts` 新增 `usagebar` 并贯穿 Nav 桌面/移动抽屉及 Footer 列；4. 双端通过 tsc/build 门禁，新增 3 项自动化测试全绿 |
 | **TASK-13** | 双端构建门禁、功能实测与体验回归 | QA | TASK-11, TASK-12 | DONE | `docs/qa/mutual_traffic_test_report.md`, `tests/` | 1. 客户端 7 项质量门禁与 12 项 affiliate 自动化用例 100% 通过（PASS）；2. Web 端 7 项 Vitest 用例 100% 通过；3. 双端 TS/Svelte 诊断 0 错 0 警；4. 20 条全量落地 URL 真实探测全部 HTTP 200 OK，无死链；5. 双向 UTM 参数互斥无污染，外链安全属性合规；出具发布准入终审结论：GO。 |
 | **TASK-14** | 总体验收、物理核验与生产发布请示 | AI-Manager | TASK-13 | DONE | `TEAM_BOARD.md`, 最终交付成果 | 物理核验产物与双端链路全部通过（DMG 4.4MB、已热更至 /Applications；Web 端全量构建全绿）；向用户出具完整验收简报并报请生产环境正式发布审批 |
+| **TASK-15** | Antigravity Gemini 配额自愈与真实消耗修复 | Developer / QA | TASK-14 | DONE | `crates/quota-core/src/providers/agy.rs`, `/Applications/CodexUsageBar.app` | 1. 根因确认为环境旧端口固化+Google CCPA 接口仅负责 3p 模型不下发 Gemini+代码盲目伪造 0% 兜底；2. 实现跨会话/GUI 独立的动态 Language Server 自愈探测（last_ls.json 持久化 + cli.log 端口实时嗅探）；3. 单元测试 51 项全绿，应用构建更新并替换运行；4. 实测成功读出 Gemini 3.8 Flash 周额度真实已用 87.3% |
 
 ---
 
@@ -35,3 +36,4 @@
 - **决策 04 [关于配额卡片呈现“已用视角”与“配速计算”]**：采纳用户截图的直观视觉方案。AI 编程工具用户更关注“已消耗了多少（已用 X%）”以及“消耗节奏是否超过时间流逝节奏（配速 = 已用% - 时间流逝%）”。卡片头部独立展示账号邮箱，进度条增加高亮指示 Thumb，底部采用三段式“重置于 周日 13:08 · 4 天后 · 配速 -39%”紧凑排版。
 - **决策 05 [关于官方品牌图标与去除模型 Emoji]**：抛弃易混淆的两位字母缩写方块，全面替换为各家 AI 官方高清晰度矢量 SVG 图标，增强辨识度与专业质感；同时根据用户指示，去除模型名称前的装饰性 Emoji（⚡、🧪、🧠），保持排版清爽专注。
 - **决策 06 [关于双向导流互斥归因与防骚扰契约]**：桌面端（CodexUsageBar）只在用户进入真实痛点情境（额度 ≥80% 告急、无订阅、主动进入设置或面板底部）被动触发轻量 Deal 标签，严禁侵入式弹窗与系统通知商业推送；Web 端（AISubDeal）在比价页紧随支付攻略后挂载伴侣卡片，并通过 `useEffect` 在客户端无侵入嗅探操作系统避免 SSR 水合不匹配；双端 UTM 归因维度严格正交（桌面端固定 `utm_source=codexusagebar&utm_medium=desktop_app`，Web 端固定 `utm_source=aisubdeal&utm_medium=web`），彻底防范双向流量重定向自循环污染。
+- **决策 07 [关于 Antigravity 本地 Language Server 动态探测与自愈]**：Google 架构中 Gemini 系列官方模型的配额仅由内部 AICode 维护并由本地 Antigravity Language Server 暴露，公网 CCPA 接口仅返回 3p 模型。此前托盘应用一旦脱离终端或旧会话端口断开，便回退至 CCPA 并在缺失 Gemini 时硬编码 0% 产生严重谎报。裁决引入动态自愈机制：结合 `last_ls.json` 持久化凭据与 `cli.log` 实时端口嗅探，使得 GUI 应用无论从何处启动均能自动自愈连接当前活动的 Antigravity 会话，确保额度读数 100% 真实。

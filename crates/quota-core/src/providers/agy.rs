@@ -82,19 +82,11 @@ pub async fn fetch(ctx: &Ctx) -> Result<Snapshot> {
 
     let is_multi_account = accounts.len() > 1;
 
-    // 1. Try local Language Server if ANTIGRAVITY_LS_ADDRESS is in the environment
-    let mut ls_snap = None;
-    let mut ls_account = None;
-
-    if let Ok(ls_addr) = std::env::var("ANTIGRAVITY_LS_ADDRESS") {
-        if !ls_addr.is_empty() {
-            let csrf = std::env::var("ANTIGRAVITY_CSRF_TOKEN").unwrap_or_default();
-            if let Ok(snap) = fetch_from_ls(ctx, &ls_addr, &csrf).await {
-                ls_account = get_ls_account_email(ctx, &ls_addr, &csrf).await;
-                ls_snap = Some(snap);
-            }
-        }
-    }
+    // 1. Try local Language Server (supporting environment vars, cached active LS, and auto-discovery)
+    let (ls_snap, ls_account) = match resolve_and_fetch_ls(ctx).await {
+        Some((snap, email)) => (Some(snap), email),
+        None => (None, None),
+    };
 
     let mut combined = Snapshot::new(ProviderId::Agy, if ls_snap.is_some() { "antigravity_ls" } else { "oauth" });
     let mut account_names = Vec::new();
@@ -323,6 +315,98 @@ fn decode_percent(s: &str) -> String {
         out.push(b as char);
     }
     out
+}
+
+fn last_ls_file(ctx: &Ctx) -> PathBuf {
+    ctx.home.join(".gemini/antigravity-cli/last_ls.json")
+}
+
+fn save_last_ls(ctx: &Ctx, addr: &str, csrf: &str) {
+    let path = last_ls_file(ctx);
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let info = serde_json::json!({
+        "ls_address": addr,
+        "csrf_token": csrf,
+        "updated_at": Utc::now().to_rfc3339(),
+    });
+    let _ = std::fs::write(path, serde_json::to_string_pretty(&info).unwrap_or_default());
+}
+
+fn load_last_ls(ctx: &Ctx) -> Option<(String, String)> {
+    let path = last_ls_file(ctx);
+    let content = std::fs::read_to_string(path).ok()?;
+    let v: Value = serde_json::from_str(&content).ok()?;
+    let addr = v.get("ls_address")?.as_str()?.to_string();
+    let csrf = v.get("csrf_token").and_then(|c| c.as_str()).unwrap_or_default().to_string();
+    if addr.is_empty() {
+        None
+    } else {
+        Some((addr, csrf))
+    }
+}
+
+fn detect_latest_ls_port_from_log(ctx: &Ctx) -> Option<u16> {
+    let log_path = ctx.home.join(".gemini/antigravity-cli/cli.log");
+    let content = std::fs::read_to_string(log_path).ok()?;
+    for line in content.lines().take(50) {
+        if line.contains("Language server listening on random port at") && line.contains("for HTTP") {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            for w in parts.windows(2) {
+                if w[1] == "for" {
+                    if let Ok(port) = w[0].parse::<u16>() {
+                        return Some(port);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+async fn resolve_and_fetch_ls(ctx: &Ctx) -> Option<(Snapshot, Option<String>)> {
+    let mut candidates: Vec<(String, String)> = Vec::new();
+
+    // 1. From environment variable (if currently set)
+    if let Ok(addr) = std::env::var("ANTIGRAVITY_LS_ADDRESS") {
+        let trimmed = addr.trim().to_string();
+        if !trimmed.is_empty() {
+            let csrf = std::env::var("ANTIGRAVITY_CSRF_TOKEN").unwrap_or_default().trim().to_string();
+            candidates.push((trimmed, csrf));
+        }
+    }
+
+    // 2. From persisted last_ls.json (cross-session / desktop GUI fallback)
+    if let Some((addr, csrf)) = load_last_ls(ctx) {
+        if !candidates.iter().any(|(a, _)| a == &addr) {
+            candidates.push((addr, csrf));
+        }
+    }
+
+    // 3. From cli.log (in case language server port changed dynamically)
+    if let Some(port) = detect_latest_ls_port_from_log(ctx) {
+        let addr = format!("localhost:{port}");
+        let known_csrf = candidates
+            .first()
+            .map(|(_, c)| c.clone())
+            .or_else(|| load_last_ls(ctx).map(|(_, c)| c))
+            .unwrap_or_default();
+        if !candidates.iter().any(|(a, _)| a == &addr) {
+            candidates.push((addr, known_csrf));
+        }
+    }
+
+    // Try candidates in order
+    for (addr, csrf) in candidates {
+        if let Ok(snap) = fetch_from_ls(ctx, &addr, &csrf).await {
+            let email = get_ls_account_email(ctx, &addr, &csrf).await;
+            save_last_ls(ctx, &addr, &csrf);
+            return Some((snap, email));
+        }
+    }
+
+    None
 }
 
 async fn fetch_from_ls(ctx: &Ctx, ls_addr: &str, csrf: &str) -> Result<Snapshot> {
