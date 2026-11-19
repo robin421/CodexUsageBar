@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import BrandMark from "./BrandMark.svelte";
   import Icon from "./Icon.svelte";
   import ProviderSection from "./ProviderSection.svelte";
@@ -39,27 +40,43 @@
   });
 
   let selectedAccount = $state<string | null>(null);
+  let lastActiveAgy = $state<string | null>(null);
+  let lastSyncedFilter = $state<string | null>(null);
 
   $effect(() => {
-    if (!selectedAccount && agyAccounts.length > 0) {
-      if (snap.active_agy_account && agyAccounts.includes(snap.active_agy_account)) {
-        selectedAccount = snap.active_agy_account;
+    if (agyAccounts.length === 0) return;
+
+    const active = snap.active_agy_account;
+    if (!selectedAccount || !agyAccounts.includes(selectedAccount)) {
+      if (active && agyAccounts.includes(active)) {
+        selectedAccount = active;
+        lastActiveAgy = active;
       } else {
         selectedAccount = agyAccounts[0];
       }
+      return;
+    }
+
+    if (active && active !== lastActiveAgy && agyAccounts.includes(active)) {
+      selectedAccount = active;
+      lastActiveAgy = active;
     }
   });
 
   $effect(() => {
-    if (snap.active_filter && snap.active_filter.startsWith("account:")) {
-      const email = snap.active_filter.replace("account:", "").split("#")[0];
-      if (email && email !== selectedAccount) {
+    const filter = snap.active_filter ?? null;
+    if (filter === untrack(() => lastSyncedFilter)) return;
+    lastSyncedFilter = filter;
+    if (filter && filter.startsWith("account:")) {
+      const email = filter.replace("account:", "").split("#")[0];
+      if (email && email !== untrack(() => selectedAccount)) {
         selectedAccount = email;
       }
     }
   });
 
   function handleSelectAccount(email: string) {
+    lastSyncedFilter = `account:${email}`;
     selectedAccount = email;
     api.setActiveFilter(`account:${email}`);
   }

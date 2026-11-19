@@ -73,9 +73,26 @@
   // Distinct Antigravity models/scopes for CURRENT selected account
   const agyModels = $derived.by(() => {
     const models = [
-      { id: "gemini-flash", name: "Gemini 3.8 Flash", keyword: "3.8 Flash", icon: "⚡" },
-      { id: "argon-4", name: "Argon 4", keyword: "Argon", icon: "🧪" },
-      { id: "claude-gpt", name: "Claude & GPT", keyword: "Claude", icon: "🧠" },
+      {
+        id: "gemini-flash",
+        fallbackName: "Gemini Models",
+        match: (s: string) =>
+          !s.includes("Argon") &&
+          (s.includes("Gemini") || s.includes("Neon") || s.includes("Hydrogen") || s.includes("Flash")),
+        icon: "⚡",
+      },
+      {
+        id: "argon-4",
+        fallbackName: "Gemini 4 Argon",
+        match: (s: string) => s.includes("Argon"),
+        icon: "🧪",
+      },
+      {
+        id: "claude-gpt",
+        fallbackName: "Claude & GPT",
+        match: (s: string) => s.includes("Claude") || s.includes("GPT"),
+        icon: "🧠",
+      },
     ];
     const accountWindows = currentAccount
       ? agyWindows.filter((w) => w.account === currentAccount || w.scope?.includes(currentAccount.split("@")[0]))
@@ -83,13 +100,16 @@
 
     return models
       .map((m) => {
-        const matching = accountWindows.filter((w) => w.scope?.includes(m.keyword));
+        const matching = accountWindows.filter((w) => w.scope && m.match(w.scope));
         const win = bottleneck(matching);
         if (!win) return null;
         const rem = remaining(win);
+        const liveName = win.scope
+          ? win.scope.replace(/\s*\([^)]+\)\s*$/, "").trim()
+          : m.fallbackName;
         return {
           id: m.id,
-          name: m.name,
+          name: liveName || m.fallbackName,
           icon: m.icon,
           pct: Math.round(rem),
           level: levelOf(win, thresholds),

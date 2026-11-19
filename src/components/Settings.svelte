@@ -37,6 +37,24 @@
 
   const local = $derived(snap.reports.filter((r) => r.auth === "local"));
   const keyed = $derived(snap.reports.filter((r) => r.auth === "api_key"));
+  const hiddenAgySet = $derived(new Set(s.hidden_agy_accounts ?? []));
+
+  function allAgyAccounts(r: ProviderReport): string[] {
+    const accs = new Set<string>();
+    for (const w of r.snapshot?.windows ?? []) {
+      if (w.account) accs.add(w.account);
+    }
+    if (r.snapshot?.account) {
+      for (const a of r.snapshot.account.split(",")) {
+        const trimmed = a.trim();
+        if (trimmed) accs.add(trimmed);
+      }
+    }
+    for (const h of s.hidden_agy_accounts ?? []) {
+      if (h) accs.add(h);
+    }
+    return Array.from(accs);
+  }
 
   function toggleProvider(id: ProviderId, on: boolean) {
     const set = new Set(s.disabled);
@@ -168,6 +186,24 @@
               <span class="pr-status" data-tone={st.tone} title={st.text}>{st.text}</span>
             </div>
             <Switch checked={!s.disabled.includes(r.id)} label="{$t('showInPanel')}: {r.name}" onchange={(v) => toggleProvider(r.id, v)} />
+            {#if r.id === "agy"}
+              {@const accounts = allAgyAccounts(r)}
+              {#if accounts.length > 0}
+                <div class="agy-accounts-sub">
+                  {#each accounts as acc (acc)}
+                    {@const visible = !hiddenAgySet.has(acc)}
+                    <div class="agy-acc-row">
+                      <span class="agy-acc-email" title={acc}>{acc}</span>
+                      <Switch
+                        checked={visible}
+                        label="{$t('showInPanel')}: {acc}"
+                        onchange={(v) => (v ? api.unhideAgyAccount(acc) : api.hideAgyAccount(acc))}
+                      />
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+            {/if}
           </li>
         {/each}
       </ul>
@@ -387,6 +423,29 @@
     padding: var(--s-3) var(--s-4);
   }
   .provider-row + .provider-row { border-top: 1px solid var(--line); }
+  .agy-accounts-sub {
+    grid-column: 2 / 4;
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-2);
+    margin-top: var(--s-2);
+    padding-top: var(--s-2);
+    border-top: 1px dashed var(--line);
+  }
+  .agy-acc-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--s-3);
+    min-width: 0;
+  }
+  .agy-acc-email {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--fs-xs);
+    color: var(--ink-2);
+  }
   .pr-text { display: flex; flex-direction: column; min-width: 0; }
   .pr-name { display: flex; align-items: center; gap: 6px; font-weight: 500; }
   .pr-status {

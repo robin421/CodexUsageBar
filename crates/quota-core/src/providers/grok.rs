@@ -17,6 +17,8 @@ use crate::util::parse_time;
 const DEFAULT_ISSUER: &str = "https://auth.x.ai";
 const DEFAULT_CLIENT_ID: &str = "b1a00492-073a-47ea-816f-4c329264a828";
 const SETTINGS_ENDPOINT: &str = "https://cli-chat-proxy.grok.com/v1/settings";
+const BILLING_ENDPOINT: &str = "https://cli-chat-proxy.grok.com/v1/billing?format=credits";
+const GROK_CLIENT_VERSION: &str = "1.0.89";
 
 #[derive(Deserialize, Debug, Clone)]
 struct GrokAuthEntry {
@@ -50,6 +52,28 @@ struct GrokSettings {
     default_model: Option<String>,
 }
 
+#[derive(Deserialize, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+struct BillingCreditsResp {
+    config: Option<BillingConfig>,
+}
+
+#[derive(Deserialize, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+struct BillingConfig {
+    current_period: Option<BillingPeriod>,
+    credit_usage_percent: Option<f64>,
+    billing_period_end: Option<String>,
+}
+
+#[derive(Deserialize, Debug, Default)]
+#[serde(rename_all = "camelCase")]
+struct BillingPeriod {
+    #[serde(rename = "type")]
+    period_type: Option<String>,
+    end: Option<String>,
+}
+
 pub async fn fetch(ctx: &Ctx) -> Result<Snapshot> {
     let auth_file = ctx.home.join(".grok/auth.json");
     if !auth_file.exists() {
@@ -68,13 +92,16 @@ pub async fn fetch(ctx: &Ctx) -> Result<Snapshot> {
 
     let access_token = ensure_valid_token(ctx, &entry).await?;
 
-    let resp = ctx
-        .http
-        .get(SETTINGS_ENDPOINT)
-        .header("Authorization", format!("Bearer {access_token}"))
-        .header("User-Agent", "xai-grok/1.0")
-        .send()
-        .await?;
+    let (settings_res, billing_opt) = tokio::join!(
+        ctx.http
+            .get(SETTINGS_ENDPOINT)
+            .header("Authorization", format!("Bearer {access_token}"))
+            .header("User-Agent", "xai-grok/1.0")
+            .send(),
+        fetch_billing(ctx, &access_token),
+    );
+
+    let resp = settings_res?;
 
     if resp.status().as_u16() == 401 {
         // Attempt a fresh refresh if possible
@@ -82,17 +109,19 @@ pub async fn fetch(ctx: &Ctx) -> Result<Snapshot> {
             let issuer = entry.oidc_issuer.as_deref().unwrap_or(DEFAULT_ISSUER);
             let client_id = entry.oidc_client_id.as_deref().unwrap_or(DEFAULT_CLIENT_ID);
             if let Ok(new_token) = refresh_grok_token(ctx, issuer, client_id, refresh_token).await {
-                let retry = ctx
-                    .http
-                    .get(SETTINGS_ENDPOINT)
-                    .header("Authorization", format!("Bearer {new_token}"))
-                    .header("User-Agent", "xai-grok/1.0")
-                    .send()
-                    .await?;
+                let (retry_res, retry_billing) = tokio::join!(
+                    ctx.http
+                        .get(SETTINGS_ENDPOINT)
+                        .header("Authorization", format!("Bearer {new_token}"))
+                        .header("User-Agent", "xai-grok/1.0")
+                        .send(),
+                    fetch_billing(ctx, &new_token),
+                );
+                let retry = retry_res?;
 
                 if retry.status().is_success() {
                     let settings: GrokSettings = retry.json().await?;
-                    return build_snapshot(settings, entry.email);
+                    return build_snapshot(settings, retry_billing, entry.email);
                 }
             }
         }
@@ -107,7 +136,25 @@ pub async fn fetch(ctx: &Ctx) -> Result<Snapshot> {
     }
 
     let settings: GrokSettings = resp.json().await?;
-    build_snapshot(settings, entry.email)
+    build_snapshot(settings, billing_opt, entry.email)
+}
+
+async fn fetch_billing(ctx: &Ctx, token: &str) -> Option<BillingCreditsResp> {
+    let resp = ctx
+        .http
+        .get(BILLING_ENDPOINT)
+        .header("Authorization", format!("Bearer {token}"))
+        .header("User-Agent", "xai-grok/1.0")
+        .header("x-grok-client-version", GROK_CLIENT_VERSION)
+        .send()
+        .await
+        .ok()?;
+
+    if !resp.status().is_success() {
+        return None;
+    }
+
+    resp.json::<BillingCreditsResp>().await.ok()
 }
 
 fn parse_auth_entry(raw: &str) -> Option<GrokAuthEntry> {
@@ -182,7 +229,15 @@ async fn refresh_grok_token(ctx: &Ctx, issuer: &str, client_id: &str, refresh_to
     Ok(data.access_token)
 }
 
-fn build_snapshot(settings: GrokSettings, email: Option<String>) -> Result<Snapshot> {
+fn parse_iso(s: &str) -> Option<chrono::DateTime<Utc>> {
+    parse_time(&serde_json::Value::String(s.to_owned()))
+}
+
+fn build_snapshot(
+    settings: GrokSettings,
+    billing: Option<BillingCreditsResp>,
+    email: Option<String>,
+) -> Result<Snapshot> {
     let tier = settings
         .subscription_tier_display
         .or(settings.subscription_tier)
@@ -198,12 +253,36 @@ fn build_snapshot(settings: GrokSettings, email: Option<String>) -> Result<Snaps
 
     let model = settings.default_model.unwrap_or_else(|| "grok-4.7".into());
 
-    // SuperGrok provides active model access window
-    snap.windows.push(
-        QuotaWindow::new("access", None, 0.0)
+    let window = match billing
+        .as_ref()
+        .and_then(|b| b.config.as_ref())
+        .and_then(|cfg| cfg.credit_usage_percent.map(|pct| (cfg, pct)))
+    {
+        Some((cfg, usage_pct)) => {
+            let used_percent = usage_pct.clamp(0.0, 100.0);
+            let period = cfg.current_period.as_ref();
+            let (window_mins, kind) = match period.and_then(|p| p.period_type.as_deref()) {
+                Some("USAGE_PERIOD_TYPE_WEEKLY") => (Some(10080), WindowKind::Weekly),
+                Some("USAGE_PERIOD_TYPE_MONTHLY") => (Some(43200), WindowKind::Monthly),
+                Some("USAGE_PERIOD_TYPE_DAILY") => (Some(1440), WindowKind::Daily),
+                _ => (None, WindowKind::Monthly),
+            };
+            let resets_at = period
+                .and_then(|p| p.end.as_deref())
+                .and_then(parse_iso)
+                .or_else(|| cfg.billing_period_end.as_deref().and_then(parse_iso));
+
+            QuotaWindow::new("access", window_mins, used_percent)
+                .scope(model)
+                .kind(kind)
+                .resets_at(resets_at)
+        }
+        None => QuotaWindow::new("access", None, 0.0)
             .scope(model)
             .kind(WindowKind::Monthly),
-    );
+    };
+
+    snap.windows.push(window);
 
     Ok(snap)
 }
@@ -231,7 +310,7 @@ mod tests {
     }
 
     #[test]
-    fn builds_snapshot_from_settings() {
+    fn builds_snapshot_from_settings_fallback() {
         let settings = GrokSettings {
             subscription_tier_display: Some("SuperGrok".into()),
             subscription_tier: None,
@@ -239,12 +318,113 @@ mod tests {
             default_model: Some("grok-4.7".into()),
         };
 
-        let s = build_snapshot(settings, Some("user@example.com".into())).expect("built");
+        let s = build_snapshot(settings, None, Some("user@example.com".into())).expect("built");
         assert_eq!(s.provider, ProviderId::Grok);
         assert_eq!(s.plan.as_deref(), Some("SuperGrok"));
         assert_eq!(s.account.as_deref(), Some("user@example.com"));
         assert_eq!(s.windows.len(), 1);
+        assert_eq!(s.windows[0].id, "access");
         assert_eq!(s.windows[0].scope.as_deref(), Some("grok-4.7"));
+        assert_eq!(s.windows[0].used_percent, 0.0);
+        assert_eq!(s.windows[0].window_mins, None);
+        assert_eq!(s.windows[0].kind, WindowKind::Monthly);
+        assert_eq!(s.windows[0].resets_at, None);
+    }
+
+    #[test]
+    fn parses_billing_credits_and_builds_weekly_snapshot() {
+        let billing_json = r#"{
+            "config": {
+                "currentPeriod": {
+                    "type": "USAGE_PERIOD_TYPE_WEEKLY",
+                    "start": "2026-11-15T04:08:48.831412+00:00",
+                    "end": "2026-11-22T04:08:48.831412+00:00"
+                },
+                "creditUsagePercent": 3.0,
+                "onDemandCap": {"val": 0},
+                "onDemandUsed": {"val": 0},
+                "productUsage": [
+                    {"product": "GrokBuild", "usagePercent": 2.0},
+                    {"product": "GrokChat", "usagePercent": 1.0}
+                ],
+                "isUnifiedBillingUser": true,
+                "prepaidBalance": {"val": 0},
+                "billingPeriodStart": "2026-11-15T04:08:48.831412+00:00",
+                "billingPeriodEnd": "2026-11-22T04:08:48.831412+00:00"
+            }
+        }"#;
+
+        let billing: BillingCreditsResp =
+            serde_json::from_str(billing_json).expect("valid billing json");
+        let settings = GrokSettings {
+            subscription_tier_display: Some("SuperGrok".into()),
+            subscription_tier: None,
+            allow_access: Some(true),
+            default_model: Some("grok-4.7".into()),
+        };
+
+        let s = build_snapshot(settings, Some(billing), Some("user@example.com".into()))
+            .expect("built");
+        assert_eq!(s.windows.len(), 1);
+        let w = &s.windows[0];
+        assert_eq!(w.id, "access");
+        assert_eq!(w.scope.as_deref(), Some("grok-4.7"));
+        assert!((w.used_percent - 3.0).abs() < f64::EPSILON);
+        assert_eq!(w.window_mins, Some(10080));
+        assert_eq!(w.kind, WindowKind::Weekly);
+        assert_eq!(
+            w.resets_at,
+            parse_iso("2026-11-22T04:08:48.831412+00:00")
+        );
+    }
+
+    #[test]
+    fn builds_snapshot_billing_period_variants_and_fallbacks() {
+        let monthly: BillingCreditsResp = serde_json::from_str(
+            r#"{
+                "config": {
+                    "currentPeriod": { "type": "USAGE_PERIOD_TYPE_MONTHLY" },
+                    "creditUsagePercent": 142.5,
+                    "billingPeriodEnd": "2026-12-01T00:00:00Z"
+                }
+            }"#,
+        )
+        .expect("monthly json");
+        let settings_m = GrokSettings {
+            subscription_tier_display: None,
+            subscription_tier: Some("GrokPro".into()),
+            allow_access: Some(true),
+            default_model: None,
+        };
+        let sm = build_snapshot(settings_m, Some(monthly), None).expect("built monthly");
+        assert_eq!(sm.windows[0].window_mins, Some(43200));
+        assert_eq!(sm.windows[0].kind, WindowKind::Monthly);
+        assert_eq!(sm.windows[0].used_percent, 100.0);
+        assert_eq!(sm.windows[0].resets_at, parse_iso("2026-12-01T00:00:00Z"));
+
+        let daily: BillingCreditsResp = serde_json::from_str(
+            r#"{
+                "config": {
+                    "currentPeriod": {
+                        "type": "USAGE_PERIOD_TYPE_DAILY",
+                        "end": "2026-11-20T00:00:00Z"
+                    },
+                    "creditUsagePercent": -5.0
+                }
+            }"#,
+        )
+        .expect("daily json");
+        let settings_d = GrokSettings {
+            subscription_tier_display: None,
+            subscription_tier: None,
+            allow_access: Some(true),
+            default_model: Some("grok-4.7".into()),
+        };
+        let sd = build_snapshot(settings_d, Some(daily), None).expect("built daily");
+        assert_eq!(sd.windows[0].window_mins, Some(1440));
+        assert_eq!(sd.windows[0].kind, WindowKind::Daily);
+        assert_eq!(sd.windows[0].used_percent, 0.0);
+        assert_eq!(sd.windows[0].resets_at, parse_iso("2026-11-20T00:00:00Z"));
     }
 
     #[test]
@@ -256,7 +436,7 @@ mod tests {
             default_model: None,
         };
 
-        let err = build_snapshot(settings, None).unwrap_err();
+        let err = build_snapshot(settings, None, None).unwrap_err();
         match err {
             FetchError::Unsupported(msg) => assert!(msg.contains("no access")),
             other => panic!("expected Unsupported, got {other:?}"),

@@ -91,6 +91,7 @@ export interface SettingsView {
   resolved_language: Lang;
   theme: "system" | "light" | "dark";
   config_path: string;
+  hidden_agy_accounts?: string[];
 }
 
 export interface AppSnapshot {

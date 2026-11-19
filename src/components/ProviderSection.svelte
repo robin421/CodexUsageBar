@@ -2,7 +2,7 @@
   import Icon from "./Icon.svelte";
   import Meter from "./Meter.svelte";
   import Monogram from "./Monogram.svelte";
-  import { amounts, formatSubLine, levelOf, money, windowName } from "../lib/format";
+  import { amounts, formatSubLine, isResetSoon, levelOf, money, windowName } from "../lib/format";
   import { t } from "../lib/i18n";
   import { api } from "../lib/api";
   import { getDealUrl } from "../lib/affiliate";
@@ -155,7 +155,7 @@
         </div>
         <Meter used={w.used_percent} {level} label={cleanedScope || windowName(w, lang)} />
         <div class="row sub">
-          <span class="when">{formatSubLine(w, now, lang)}</span>
+          <span class="when" class:soon={isResetSoon(w.resets_at, now)}>{formatSubLine(w, now, lang)}</span>
           {#if w.used_percent >= 80}
             <button
               type="button"
@@ -271,13 +271,16 @@
     margin-left: auto;
   }
   .acc-chip {
+    display: inline-flex;
+    align-items: center;
     padding: 2px 8px;
-    border-radius: var(--r-sm);
     border: none;
+    border-radius: var(--r-sm);
     background: transparent;
     color: var(--ink-2);
     font-size: var(--fs-xs);
     font-weight: 500;
+    line-height: 16px;
     cursor: pointer;
     transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
   }
@@ -366,6 +369,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .when.soon {
+    color: var(--warn);
+    font-weight: 500;
   }
   .deal-alert-link {
     display: inline-flex;

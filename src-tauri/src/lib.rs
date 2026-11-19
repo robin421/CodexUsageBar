@@ -41,6 +41,51 @@ async fn switch_agy_account(app: AppHandle, email: String) -> AppSnapshot {
 }
 
 #[tauri::command]
+fn hide_agy_account(app: AppHandle, email: String) -> AppSnapshot {
+    let trimmed = email.trim().to_string();
+    let state = app.state::<AppState>();
+    if !trimmed.is_empty() {
+        let mut s = state.settings.lock().unwrap();
+        if !s.hidden_agy_accounts.iter().any(|h| h == &trimmed) {
+            s.hidden_agy_accounts.push(trimmed);
+            s.save();
+        }
+    }
+    state::emit(&app);
+    state.snapshot()
+}
+
+#[tauri::command]
+fn unhide_agy_account(app: AppHandle, email: String) -> AppSnapshot {
+    let trimmed = email.trim().to_string();
+    let state = app.state::<AppState>();
+    if !trimmed.is_empty() {
+        let mut s = state.settings.lock().unwrap();
+        let before = s.hidden_agy_accounts.len();
+        s.hidden_agy_accounts.retain(|h| h != &trimmed);
+        if s.hidden_agy_accounts.len() != before {
+            s.save();
+        }
+    }
+    state::emit(&app);
+    state.snapshot()
+}
+
+#[tauri::command]
+fn restore_agy_accounts(app: AppHandle) -> AppSnapshot {
+    let state = app.state::<AppState>();
+    {
+        let mut s = state.settings.lock().unwrap();
+        if !s.hidden_agy_accounts.is_empty() {
+            s.hidden_agy_accounts.clear();
+            s.save();
+        }
+    }
+    state::emit(&app);
+    state.snapshot()
+}
+
+#[tauri::command]
 async fn refresh(app: AppHandle) -> AppSnapshot {
     state::refresh(app.clone()).await;
     app.state::<AppState>().snapshot()
@@ -181,6 +226,9 @@ pub fn run() {
             get_snapshot,
             set_active_filter,
             switch_agy_account,
+            hide_agy_account,
+            unhide_agy_account,
+            restore_agy_accounts,
             refresh,
             update_settings,
             set_api_key,

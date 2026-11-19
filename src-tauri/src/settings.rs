@@ -31,6 +31,8 @@ pub struct Settings {
     pub language: String,
     /// "system", "light" or "dark".
     pub theme: String,
+    #[serde(default)]
+    pub hidden_agy_accounts: Vec<String>,
 }
 
 impl Default for Settings {
@@ -45,6 +47,7 @@ impl Default for Settings {
             api_keys: HashMap::new(),
             language: "auto".into(),
             theme: "system".into(),
+            hidden_agy_accounts: Vec::new(),
         }
     }
 }
@@ -97,6 +100,7 @@ impl Settings {
             resolved_language: self.lang(),
             theme: self.theme.clone(),
             config_path: Self::dir().join("config.json").display().to_string(),
+            hidden_agy_accounts: self.hidden_agy_accounts.clone(),
         }
     }
 }
@@ -115,6 +119,7 @@ pub struct SettingsView {
     pub resolved_language: Lang,
     pub theme: String,
     pub config_path: String,
+    pub hidden_agy_accounts: Vec<String>,
 }
 
 #[derive(Deserialize, Debug, Default)]

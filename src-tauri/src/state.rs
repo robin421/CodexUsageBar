@@ -39,10 +39,73 @@ pub struct AppSnapshot {
 }
 
 pub fn get_active_agy_account() -> Option<String> {
-    let path = dirs::home_dir()?.join(".gemini/google_accounts.json");
-    let content = std::fs::read_to_string(path).ok()?;
-    let v: serde_json::Value = serde_json::from_str(&content).ok()?;
-    v.get("active").and_then(|a| a.as_str()).map(ToString::to_string)
+    let home = dirs::home_dir()?;
+    quota_core::providers::agy::detect_active_account_from_home(&home)
+}
+
+fn filter_hidden_agy_reports(reports: &mut [ProviderReport], hidden: &[String]) {
+    if hidden.is_empty() {
+        return;
+    }
+    for r in reports.iter_mut() {
+        if r.id != quota_core::ProviderId::Agy {
+            continue;
+        }
+        if let Some(snap) = r.snapshot.as_mut() {
+            snap.windows.retain(|w| {
+                w.account
+                    .as_deref()
+                    .is_none_or(|acc| !hidden.iter().any(|h| h == acc))
+            });
+            if let Some(account_str) = snap.account.as_deref() {
+                let visible: Vec<&str> = account_str
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|acc| !acc.is_empty() && !hidden.iter().any(|h| h == acc))
+                    .collect();
+                snap.account = if visible.is_empty() {
+                    None
+                } else {
+                    Some(visible.join(", "))
+                };
+            }
+        }
+    }
+}
+
+fn first_visible_agy_account(reports: &[ProviderReport]) -> Option<String> {
+    let agy = reports.iter().find(|r| r.id == quota_core::ProviderId::Agy)?;
+    let snap = agy.snapshot.as_ref()?;
+    if let Some(first_acc) = snap
+        .account
+        .as_deref()
+        .and_then(|a| a.split(',').next())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return Some(first_acc.to_string());
+    }
+    snap.windows
+        .iter()
+        .find_map(|w| w.account.as_deref().map(str::trim).filter(|s| !s.is_empty()))
+        .map(str::to_string)
+}
+
+fn resolve_active_agy_account(reports: &[ProviderReport], hidden: &[String]) -> Option<String> {
+    if let Some(active) = get_active_agy_account() {
+        if !hidden.iter().any(|h| h == &active) {
+            return Some(active);
+        }
+        return first_visible_agy_account(reports);
+    }
+    if let Some(agy) = reports.iter().find(|r| r.id == quota_core::ProviderId::Agy) {
+        if let Some(snap) = agy.snapshot.as_ref() {
+            if snap.source == "antigravity_ls" {
+                return first_visible_agy_account(reports);
+            }
+        }
+    }
+    None
 }
 
 fn cache_dir() -> std::path::PathBuf {
@@ -78,8 +141,10 @@ impl AppState {
 
     pub fn snapshot(&self) -> AppSnapshot {
         let settings = self.settings.lock().unwrap();
-        let reports = self.reports.lock().unwrap().clone();
+        let mut reports = self.reports.lock().unwrap().clone();
+        filter_hidden_agy_reports(&mut reports, &settings.hidden_agy_accounts);
         let active_filter = self.active_filter.lock().unwrap().clone();
+        let active_agy_account = resolve_active_agy_account(&reports, &settings.hidden_agy_accounts);
         AppSnapshot {
             overview: Overview::from_reports(&reports, &settings.thresholds),
             reports,
@@ -88,7 +153,7 @@ impl AppState {
             settings: settings.view(),
             platform: std::env::consts::OS,
             active_filter,
-            active_agy_account: get_active_agy_account(),
+            active_agy_account,
         }
     }
 
@@ -186,4 +251,33 @@ pub fn spawn_scheduler(app: AppHandle) {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use quota_core::{ProviderId, QuotaWindow, Snapshot};
+
+    #[test]
+    fn filter_hidden_agy_reports_removes_hidden_windows_and_accounts() {
+        let mut snap = Snapshot::new(ProviderId::Agy, "antigravity_ls");
+        snap.account = Some("a@example.com, b@example.com".to_string());
+        let mut w_a = QuotaWindow::new("a_gemini", Some(300), 10.0);
+        w_a.account = Some("a@example.com".to_string());
+        let mut w_b = QuotaWindow::new("b_gemini", Some(300), 20.0);
+        w_b.account = Some("b@example.com".to_string());
+        snap.windows.extend([w_a, w_b]);
+
+        let mut report = ProviderReport::new(ProviderId::Agy, Status::Ok);
+        report.snapshot = Some(snap);
+        let mut reports = vec![report];
+
+        filter_hidden_agy_reports(&mut reports, &["a@example.com".to_string()]);
+
+        let filtered = reports[0].snapshot.as_ref().unwrap();
+        assert_eq!(filtered.account.as_deref(), Some("b@example.com"));
+        assert_eq!(filtered.windows.len(), 1);
+        assert_eq!(filtered.windows[0].account.as_deref(), Some("b@example.com"));
+        assert_eq!(first_visible_agy_account(&reports).as_deref(), Some("b@example.com"));
+    }
 }

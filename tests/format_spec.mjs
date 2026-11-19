@@ -64,6 +64,14 @@ function windowName(w, lang) {
   return isZh ? "周期额度" : "Limit";
 }
 
+function isResetSoon(resetsAt, now) {
+  if (!resetsAt) return false;
+  const resetMs = Date.parse(resetsAt);
+  if (Number.isNaN(resetMs)) return false;
+  const diff = resetMs - now;
+  return diff > 0 && diff <= 86_400_000;
+}
+
 function formatResetAt(resetsAt, now, lang) {
   if (!resetsAt) return null;
   const t = Date.parse(resetsAt);
@@ -467,4 +475,28 @@ test("formatSubLine: boundary missing window_mins omits pace cleanly without tra
   assert.match(lineEn, /^Resets Today \d{2}:\d{2} · in 3 hours$/);
   assert.ok(!lineEn.includes("Pace"));
   assert.ok(!lineEn.endsWith(" · "));
+});
+
+test("isResetSoon: boundary checks for 24h, 1h, expired -1s, >1d 25h, and null", () => {
+  const now = new Date("2026-11-11T12:00:00Z").getTime();
+
+  // Exactly 24h (86_400_000 ms) -> true
+  assert.equal(isResetSoon(new Date(now + 86_400_000).toISOString(), now), true);
+
+  // 1h -> true
+  assert.equal(isResetSoon(new Date(now + 3_600_000).toISOString(), now), true);
+
+  // Expired -1s -> false
+  assert.equal(isResetSoon(new Date(now - 1_000).toISOString(), now), false);
+
+  // Exactly now (0ms) -> false
+  assert.equal(isResetSoon(new Date(now).toISOString(), now), false);
+
+  // Over 1 day (25h) -> false
+  assert.equal(isResetSoon(new Date(now + 25 * 3_600_000).toISOString(), now), false);
+
+  // null / undefined / invalid -> false
+  assert.equal(isResetSoon(null, now), false);
+  assert.equal(isResetSoon(undefined, now), false);
+  assert.equal(isResetSoon("invalid-date", now), false);
 });

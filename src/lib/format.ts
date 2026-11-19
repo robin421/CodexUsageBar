@@ -87,6 +87,14 @@ export function windowName(w: QuotaWindow, lang: Lang): string {
   return zh ? "周期额度" : "Limit";
 }
 
+export function isResetSoon(resetsAt: string | null | undefined, now: number): boolean {
+  if (!resetsAt) return false;
+  const resetMs = Date.parse(resetsAt);
+  if (Number.isNaN(resetMs)) return false;
+  const diff = resetMs - now;
+  return diff > 0 && diff <= 86_400_000;
+}
+
 /**
  * Absolute reset time formatted for subline or display:
  * "今天 13:08", "明天 13:08", "周日 13:08", "4月12日 13:08".

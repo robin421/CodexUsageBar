@@ -111,8 +111,8 @@ mod tests {
     #[test]
     fn tightest_for_account_skips_unallocated_models() {
         let mut s = Snapshot::new(ProviderId::Agy, "oauth");
-        // Flash 100%
-        let mut w_flash = QuotaWindow::new("robin421_flash", Some(10080), 0.0).scope("Gemini 3.8 Flash (robin421)");
+        // Gemini Models 100%
+        let mut w_flash = QuotaWindow::new("robin421_flash", Some(10080), 0.0).scope("Gemini 4 Neon · Hydrogen (robin421)");
         w_flash.account = Some("robin421@gmail.com".into());
         s.windows.push(w_flash);
 
@@ -121,8 +121,8 @@ mod tests {
         w_claude.account = Some("robin421@gmail.com".into());
         s.windows.push(w_claude);
 
-        // Argon 4 0% (unallocated: resets_at is None)
-        let mut w_argon = QuotaWindow::new("robin421_argon", Some(10080), 100.0).scope("Argon 4 (robin421)");
+        // Gemini 4 Argon 0% (unallocated: resets_at is None)
+        let mut w_argon = QuotaWindow::new("robin421_argon", Some(10080), 100.0).scope("Gemini 4 Argon (robin421)");
         w_argon.account = Some("robin421@gmail.com".into());
         s.windows.push(w_argon);
 
