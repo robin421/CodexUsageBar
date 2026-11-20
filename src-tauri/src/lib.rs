@@ -95,10 +95,17 @@ async fn refresh(app: AppHandle) -> AppSnapshot {
 fn update_settings(app: AppHandle, patch: SettingsPatch) -> AppSnapshot {
     let state = app.state::<AppState>();
     let refetch = patch.disabled.is_some();
+    let language_changed = patch.language.is_some();
     {
         let mut s = state.settings.lock().unwrap();
         s.apply(patch);
         s.save();
+    }
+    if language_changed {
+        if let Some(win) = app.get_webview_window("settings") {
+            let lang = state.settings.lock().unwrap().lang();
+            let _ = win.set_title(tray::settings_title(lang));
+        }
     }
     state::emit(&app);
     if refetch {
@@ -152,11 +159,11 @@ async fn diagnostics() -> Vec<DiagnosticEntry> {
 #[tauri::command]
 fn test_notification(app: AppHandle) {
     use tauri_plugin_notification::NotificationExt;
-    let zh = app.state::<AppState>().settings.lock().unwrap().lang() == quota_core::format::Lang::Zh;
-    let (title, body) = if zh {
-        ("CodexUsageBar 测试通知", "额度不足时会以这种方式提醒你。")
-    } else {
-        ("CodexUsageBar test notification", "This is how low-quota alerts will look.")
+    let (title, body) = match app.state::<AppState>().settings.lock().unwrap().lang() {
+        quota_core::format::Lang::Zh => ("CodexUsageBar 测试通知", "额度不足时会以这种方式提醒你。"),
+        quota_core::format::Lang::Ja => ("CodexUsageBar テスト通知", "残量が少ないときに、このように知らせます。"),
+        quota_core::format::Lang::Ko => ("CodexUsageBar 테스트 알림", "잔여량이 부족하면 이렇게 알려 드립니다."),
+        quota_core::format::Lang::En => ("CodexUsageBar test notification", "This is how low-quota alerts will look."),
     };
     let _ = app.notification().builder().title(title).body(body).show();
 }

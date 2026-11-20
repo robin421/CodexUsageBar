@@ -1,7 +1,7 @@
 <script lang="ts">
   // Seven days of resets on one axis: each tag is a limit coming back, underlined in the colour
   // of how depleted it is now. Answers "when do I get quota back?" across every tool at once.
-  import { levelOf, MONOGRAM, resetClock, windowName } from "../lib/format";
+  import { levelOf, localeOf, MONOGRAM, representativeScope, resetClock, windowName } from "../lib/format";
   import { t } from "../lib/i18n";
   import type { Lang, ProviderReport, Thresholds } from "../lib/types";
 
@@ -14,7 +14,7 @@
     const out: { x: number; label: string }[] = [];
     const d = new Date(now);
     d.setHours(24, 0, 0, 0);
-    const fmt = new Intl.DateTimeFormat(lang === "zh" ? "zh-CN" : "en-US", { weekday: "short" });
+    const fmt = new Intl.DateTimeFormat(localeOf(lang), { weekday: "short" });
     for (; d.getTime() - now < RANGE; d.setDate(d.getDate() + 1)) {
       out.push({ x: ((d.getTime() - now) / RANGE) * 100, label: fmt.format(d) });
     }
@@ -32,7 +32,7 @@
         // One tag per provider per reset moment; it takes the most depleted window's colour.
         const key = `${r.id}:${Math.round(dt / 600_000)}`;
         const level = levelOf(w, thresholds);
-        const title = `${r.name} ${windowName(w, lang)}${w.scope ? ` ${w.scope}` : ""}: ${resetClock(w.resets_at, now, lang)}`;
+        const title = `${r.name} ${windowName(w, lang)}${w.scope ? ` ${representativeScope(w.scope)}` : ""}: ${resetClock(w.resets_at, now, lang)}`;
         const prev = byKey.get(key);
         if (prev) {
           prev.titles.push(title);

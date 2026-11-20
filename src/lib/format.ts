@@ -3,6 +3,128 @@ import { translate } from "./i18n";
 
 export const remaining = (w: QuotaWindow) => Math.max(0, Math.min(100, 100 - w.used_percent));
 
+export function localeOf(lang: Lang): string {
+  if (lang === "zh") return "zh-CN";
+  if (lang === "ja") return "ja-JP";
+  if (lang === "ko") return "ko-KR";
+  return "en-GB";
+}
+
+const WEEKDAYS: Record<Lang, string[]> = {
+  zh: ["周日", "周一", "周二", "周三", "周四", "周五", "周六"],
+  ja: ["日曜", "月曜", "火曜", "水曜", "木曜", "金曜", "土曜"],
+  ko: ["일", "월", "화", "수", "목", "금", "토"],
+  en: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
+};
+
+function dayLabel(lang: Lang, dayDiff: number, hm: string): string | null {
+  if (dayDiff === 0) {
+    if (lang === "zh") return `今天 ${hm}`;
+    if (lang === "ja") return `今日 ${hm}`;
+    if (lang === "ko") return `오늘 ${hm}`;
+    return `Today ${hm}`;
+  }
+  if (dayDiff === 1) {
+    if (lang === "zh") return `明天 ${hm}`;
+    if (lang === "ja") return `明日 ${hm}`;
+    if (lang === "ko") return `내일 ${hm}`;
+    return `Tomorrow ${hm}`;
+  }
+  return null;
+}
+
+function calendarDate(d: Date, lang: Lang, hm: string, withYear: boolean): string {
+  const y = d.getFullYear();
+  const m = d.getMonth() + 1;
+  const day = d.getDate();
+  if (lang === "zh" || lang === "ja") {
+    return withYear ? `${y}年${m}月${day}日 ${hm}` : `${m}月${day}日 ${hm}`;
+  }
+  if (lang === "ko") {
+    return withYear ? `${y}년 ${m}월 ${day}일 ${hm}` : `${m}월 ${day}일 ${hm}`;
+  }
+  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+  return withYear
+    ? `${monthNames[d.getMonth()]} ${day}, ${y} ${hm}`
+    : `${monthNames[d.getMonth()]} ${day} ${hm}`;
+}
+
+/**
+ * One flagship per model family. A shared pool stored as
+ * "Claude Opus 5.5 · Sonnet 5.5 · GPT-OSS 120B" reads as "Claude Opus 5.5 · GPT-OSS 120B".
+ */
+export function representativeScope(scope: string): string {
+  const parts = scope.split(" · ").map((s) => s.trim()).filter(Boolean);
+  if (parts.length <= 1) return scope;
+
+  const explicitFamily = (name: string): string | null => {
+    const l = name.toLowerCase();
+    if (l.includes("argon")) return "argon";
+    if (l.includes("claude") || l.includes("opus") || l.includes("sonnet") || l.includes("haiku")) return "claude";
+    if (l.includes("gpt")) return "gpt";
+    if (l.includes("gemini") || l.includes("hydrogen") || l.includes("neon") || l.includes("orchestrator") || l.includes("flash") || l.includes("sonar")) return "gemini";
+    return null;
+  };
+
+  const versionOf = (name: string): [number, number] => {
+    for (const token of name.split(/[^0-9.]+/).filter(Boolean)) {
+      if (token.includes(".")) {
+        const [a, b] = token.split(".");
+        const maj = Number(a);
+        const min = Number(b);
+        if (Number.isFinite(maj) && Number.isFinite(min) && b !== "") return [maj, min];
+      } else {
+        const n = Number(token);
+        if (Number.isFinite(n) && n < 100) return [n, 0];
+      }
+    }
+    return [0, 0];
+  };
+
+  const tierOf = (name: string): number => {
+    const l = name.toLowerCase();
+    let tier = 20;
+    if (/ultra|opus|hydrogen|neon|sonar|orchestrator/.test(l)) tier = 40;
+    else if (/pro|sonnet/.test(l)) tier = 30;
+    else if (l.includes("gpt")) tier = 30;
+    else if (/flash|haiku/.test(l)) tier = 10;
+    if (l.includes("hydrogen") || l.includes("opus")) tier += 5;
+    else if (l.includes("neon")) tier += 4;
+    else if (l.includes("sonar")) tier += 3;
+    return tier;
+  };
+
+  const better = (a: string, b: string): number => {
+    const [aMaj, aMin] = versionOf(a);
+    const [bMaj, bMin] = versionOf(b);
+    if (aMaj !== bMaj) return aMaj - bMaj;
+    if (aMin !== bMin) return aMin - bMin;
+    return tierOf(a) - tierOf(b);
+  };
+
+  const branded = (part: string, family: string, donor?: string): string => {
+    if (family === "claude" && !/claude/i.test(part) && donor && /claude/i.test(donor)) return `Claude ${part}`;
+    if (family === "gemini" && !/gemini/i.test(part) && donor && /gemini/i.test(donor)) return `Gemini ${part}`;
+    return part;
+  };
+
+  const order: string[] = [];
+  const best = new Map<string, string>();
+  let lastFamily = "";
+  for (const part of parts) {
+    const family = explicitFamily(part) ?? (lastFamily || (part.split(/\s+/)[0] ?? part).toLowerCase());
+    lastFamily = family;
+    const current = best.get(family);
+    if (!current) {
+      order.push(family);
+      best.set(family, part);
+    } else if (better(part, current) > 0) {
+      best.set(family, branded(part, family, current));
+    }
+  }
+  return order.map((family) => best.get(family) ?? "").filter(Boolean).join(" · ");
+}
+
 export function levelOf(w: QuotaWindow, t: Thresholds): Level {
   const r = remaining(w);
   return r < t.critical ? "critical" : r < t.warning ? "warning" : "normal";
@@ -16,6 +138,16 @@ export function span(ms: number, lang: Lang): string {
     if (d > 0) return h > 0 ? `${d} 天 ${h} 小时` : `${d} 天`;
     if (h > 0) return m > 0 ? `${h} 小时 ${m} 分钟` : `${h} 小时`;
     return `${m} 分钟`;
+  }
+  if (lang === "ja") {
+    if (d > 0) return h > 0 ? `${d}日${h}時間` : `${d}日`;
+    if (h > 0) return m > 0 ? `${h}時間${m}分` : `${h}時間`;
+    return `${m}分`;
+  }
+  if (lang === "ko") {
+    if (d > 0) return h > 0 ? `${d}일 ${h}시간` : `${d}일`;
+    if (h > 0) return m > 0 ? `${h}시간 ${m}분` : `${h}시간`;
+    return `${m}분`;
   }
   if (d > 0) return h > 0 ? `${d}d ${h}h` : `${d}d`;
   if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`;
@@ -54,37 +186,43 @@ export function resetClock(resetsAt: string | null, now: number, lang: Lang): st
   const d = new Date(resetsAt);
   const today = new Date(now);
   const dayDiff = Math.round((new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() - new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) / 86_400_000);
-  const hm = d.toLocaleTimeString(lang === "zh" ? "zh-CN" : "en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
-  if (lang === "zh") {
-    if (dayDiff === 0) return `今天 ${hm}`;
-    if (dayDiff === 1) return `明天 ${hm}`;
-    return `${d.getMonth() + 1}月${d.getDate()}日 ${hm}`;
-  }
-  if (dayDiff === 0) return `Today ${hm}`;
-  if (dayDiff === 1) return `Tomorrow ${hm}`;
-  return `${d.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${hm}`;
+  const hm = d.toLocaleTimeString(localeOf(lang), { hour: "2-digit", minute: "2-digit", hour12: false });
+  const named = dayLabel(lang, dayDiff, hm);
+  if (named) return named;
+  return calendarDate(d, lang, hm, d.getFullYear() !== today.getFullYear());
 }
 
 /** "5 小时", "7 天", "24 小时", "月度" */
 export function windowName(w: QuotaWindow, lang: Lang): string {
-  const zh = lang === "zh";
-  if (w.window_mins === 300) return zh ? "5 小时" : "5 hours";
-  if (w.window_mins === 1440 || w.kind === "daily") return zh ? "24 小时" : "24 hours";
-  if (w.window_mins === 10080 || w.kind === "weekly") return zh ? "7 天" : "7 days";
-  if (w.kind === "monthly") return zh ? "月度" : "Monthly";
+  const label = (zh: string, en: string, ja: string, ko: string) =>
+    lang === "zh" ? zh : lang === "ja" ? ja : lang === "ko" ? ko : en;
+  if (w.window_mins === 300) return label("5 小时", "5 hours", "5時間", "5시간");
+  if (w.window_mins === 1440 || w.kind === "daily") return label("24 小时", "24 hours", "24時間", "24시간");
+  if (w.window_mins === 10080 || w.kind === "weekly") return label("7 天", "7 days", "7日", "7일");
+  if (w.kind === "monthly") return label("月度", "Monthly", "月間", "월간");
   if (w.window_mins) {
     if (w.window_mins >= 1440 && w.window_mins % 1440 === 0) {
       const days = w.window_mins / 1440;
-      return zh ? `${days} 天` : `${days} ${days === 1 ? "day" : "days"}`;
+      return label(
+        `${days} 天`,
+        `${days} ${days === 1 ? "day" : "days"}`,
+        `${days}日`,
+        `${days}일`,
+      );
     }
     if (w.window_mins % 60 === 0) {
       const hrs = w.window_mins / 60;
-      return zh ? `${hrs} 小时` : `${hrs} ${hrs === 1 ? "hour" : "hours"}`;
+      return label(
+        `${hrs} 小时`,
+        `${hrs} ${hrs === 1 ? "hour" : "hours"}`,
+        `${hrs}時間`,
+        `${hrs}시간`,
+      );
     }
-    return zh ? `${w.window_mins} 分钟` : `${w.window_mins} mins`;
+    return label(`${w.window_mins} 分钟`, `${w.window_mins} mins`, `${w.window_mins}分`, `${w.window_mins}분`);
   }
-  if (w.kind === "session") return zh ? "单次会话" : "Session";
-  return zh ? "周期额度" : "Limit";
+  if (w.kind === "session") return label("单次会话", "Session", "セッション", "세션");
+  return label("周期额度", "Limit", "期間", "기간");
 }
 
 export function isResetSoon(resetsAt: string | null | undefined, now: number): boolean {
@@ -110,57 +248,57 @@ export function formatResetAt(resetsAt: string | null, now: number, lang: Lang):
   const nowMidnight = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate()).getTime();
   const dayDiff = Math.round((targetMidnight - nowMidnight) / 86_400_000);
 
-  const hm = d.toLocaleTimeString(lang === "zh" ? "zh-CN" : "en-GB", {
+  const hm = d.toLocaleTimeString(localeOf(lang), {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
   });
 
-  const zh = lang === "zh";
-
-  if (dayDiff === 0) return zh ? `今天 ${hm}` : `Today ${hm}`;
-  if (dayDiff === 1) return zh ? `明天 ${hm}` : `Tomorrow ${hm}`;
+  const named = dayLabel(lang, dayDiff, hm);
+  if (named) return named;
   if (dayDiff >= 2 && dayDiff <= 6) {
-    const zhDays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
-    const enDays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-    const dayName = zh ? zhDays[d.getDay()] : enDays[d.getDay()];
-    return `${dayName} ${hm}`;
+    return `${WEEKDAYS[lang][d.getDay()]} ${hm}`;
   }
 
-  const isSameYear = d.getFullYear() === nowD.getFullYear();
-  if (zh) {
-    return isSameYear
-      ? `${d.getMonth() + 1}月${d.getDate()}日 ${hm}`
-      : `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${hm}`;
-  }
-  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-  return isSameYear
-    ? `${monthNames[d.getMonth()]} ${d.getDate()} ${hm}`
-    : `${monthNames[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()} ${hm}`;
+  return calendarDate(d, lang, hm, d.getFullYear() !== nowD.getFullYear());
 }
 
 /**
- * Relative countdown formatted concisely:
- * "4 天后", "3 小时后", "25 分钟后", "即将重置", "已重置".
+ * Time still left, as its own clause:
+ * "还有 4 天", "还有 3 小时", "还有 25 分钟", "不到 1 分钟", "已重置".
  */
 export function formatRelativeCountdown(resetsAt: string | null, now: number, lang: Lang): string | null {
   if (!resetsAt) return null;
   const t = Date.parse(resetsAt);
   if (Number.isNaN(t)) return null;
   const ms = t - now;
-  const zh = lang === "zh";
 
   if (ms <= 0) return translate(lang, "resetDone");
-  if (ms < 60_000) return translate(lang, "resetSoon");
+  if (ms < 60_000) return translate(lang, "underOneMin");
 
   const mins = Math.floor(ms / 60_000);
   const d = Math.floor(mins / 1440);
   const h = Math.floor((mins % 1440) / 60);
   const m = mins % 60;
 
-  if (d > 0) return zh ? `${d} 天后` : `in ${d} ${d === 1 ? "day" : "days"}`;
-  if (h > 0) return zh ? `${h} 小时后` : `in ${h} ${h === 1 ? "hour" : "hours"}`;
-  return zh ? `${m} 分钟后` : `in ${m} ${m === 1 ? "min" : "mins"}`;
+  const left = (n: number, unit: "d" | "h" | "m") => {
+    if (lang === "zh") return `还有 ${n} ${unit === "d" ? "天" : unit === "h" ? "小时" : "分钟"}`;
+    if (lang === "ja") return `あと${n}${unit === "d" ? "日" : unit === "h" ? "時間" : "分"}`;
+    if (lang === "ko") return `${n}${unit === "d" ? "일" : unit === "h" ? "시간" : "분"} 남음`;
+    const word = unit === "d" ? (n === 1 ? "day" : "days") : unit === "h" ? (n === 1 ? "hour" : "hours") : (n === 1 ? "min" : "mins");
+    return `${n} ${word} left`;
+  };
+
+  if (d > 0) return left(d, "d");
+  if (h > 0) return left(h, "h");
+  return left(m, "m");
+}
+
+/** Usage vs even burn: "比匀速快 15%" / "15% ahead of pace". */
+function formatPace(pace: number, lang: Lang): string {
+  if (pace > 0) return translate(lang, "paceAhead", { n: pace });
+  if (pace < 0) return translate(lang, "paceBehind", { n: -pace });
+  return translate(lang, "paceEven");
 }
 
 /**
@@ -192,7 +330,7 @@ export function calcPace(w: QuotaWindow, now: number): number | null {
 
 /**
  * Three-segment subline:
- * "重置于 周日 13:08 · 4 天后 · 配速 -39%"
+ * "周日 13:08 重置 · 还有 4 天 · 比匀速慢 39%"
  * Falls back gracefully when resets_at or window duration is missing.
  */
 export function formatSubLine(w: QuotaWindow, now: number, lang: Lang): string {
@@ -235,14 +373,13 @@ export function formatSubLine(w: QuotaWindow, now: number, lang: Lang): string {
 
   const pace = calcPace(w, now);
   if (pace !== null) {
-    const paceStr = pace > 0 ? `+${pace}%` : `${pace}%`;
-    parts.push(translate(lang, "pacePrefix", { pace: paceStr }));
+    parts.push(formatPace(pace, lang));
   }
 
   return parts.length > 0 ? parts.join(" · ") : countdown(w.resets_at, now, lang, remaining(w), w);
 }
 
-const nf = (lang: Lang, max = 0) => new Intl.NumberFormat(lang === "zh" ? "zh-CN" : "en-US", { maximumFractionDigits: max });
+const nf = (lang: Lang, max = 0) => new Intl.NumberFormat(localeOf(lang), { maximumFractionDigits: max });
 
 /** "222 / 300 次", "$11.60 / $20.00". */
 export function amounts(w: QuotaWindow, lang: Lang): string | null {
@@ -275,16 +412,18 @@ export function expectedRemaining(w: QuotaWindow, now: number): number | null {
 
 export function hhmm(iso: string | null, lang: Lang): string {
   if (!iso) return "";
-  return new Date(iso).toLocaleTimeString(lang === "zh" ? "zh-CN" : "en-GB", { hour: "2-digit", minute: "2-digit", hour12: false });
+  return new Date(iso).toLocaleTimeString(localeOf(lang), { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 export const MONOGRAM: Record<ProviderId, string> = {
   codex: "Cx", claude: "Cl", agy: "Ag", gemini: "Gm", grok: "Gk", copilot: "Gh", opencode: "Oc", cursor: "Cu", jetbrains: "Jb",
-  codebuff: "Cb", openrouter: "Or", deepseek: "Ds", moonshot: "Ki", zai: "Z", minimax: "Mm",
+  codebuff: "Cb", workbuddy: "Wb", kiro: "Kr", commandcode: "Cc", openrouter: "Or", deepseek: "Ds", moonshot: "Ki", zai: "Z", minimax: "Mm",
+  volcengine: "Ve", bailian: "Bl", qianfan: "Qf", qoder: "Qd",
 };
 
 export const ENV_KEYS: Partial<Record<ProviderId, string>> = {
   agy: "ANTIGRAVITY_API_KEY", gemini: "GEMINI_API_KEY", grok: "GROK_API_KEY",
   openrouter: "OPENROUTER_API_KEY", deepseek: "DEEPSEEK_API_KEY", moonshot: "MOONSHOT_API_KEY",
   zai: "Z_AI_API_KEY", minimax: "MINIMAX_API_KEY", codebuff: "CODEBUFF_API_KEY", opencode: "OPENCODE_API_KEY",
+  volcengine: "VOLC_ACCESSKEY", bailian: "ALIBABA_CLOUD_ACCESS_KEY_ID", qianfan: "QIANFAN_COOKIE", qoder: "QODER_TOKEN",
 };

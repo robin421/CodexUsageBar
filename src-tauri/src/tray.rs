@@ -54,10 +54,25 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-fn tr(lang: Lang, zh: &'static str, en: &'static str) -> &'static str {
+pub fn settings_title(lang: Lang) -> &'static str {
+    tr(lang, "CodexUsageBar 设置", "CodexUsageBar Settings", "CodexUsageBar 設定", "CodexUsageBar 설정")
+}
+
+fn tr(lang: Lang, zh: &'static str, en: &'static str, ja: &'static str, ko: &'static str) -> &'static str {
     match lang {
         Lang::Zh => zh,
         Lang::En => en,
+        Lang::Ja => ja,
+        Lang::Ko => ko,
+    }
+}
+
+fn remaining_label(lang: Lang, percent: f64) -> String {
+    match lang {
+        Lang::Zh => format!("剩余 {percent:.0}%"),
+        Lang::Ja => format!("残り {percent:.0}%"),
+        Lang::Ko => format!("{percent:.0}% 남음"),
+        Lang::En => format!("{percent:.0}%"),
     }
 }
 
@@ -69,14 +84,13 @@ fn build_menu(app: &AppHandle, snap: Option<&AppSnapshot>, lang: Lang) -> tauri:
         for r in snap.reports.iter().filter(|r| r.visible()) {
             let line = match r.snapshot.as_ref().and_then(|s| s.tightest()) {
                 Some(w) => format!(
-                    "{}  {} {}{:.0}%  {}",
+                    "{}  {} {}  {}",
                     r.name,
                     short_label(w),
-                    tr(lang, "剩余 ", ""),
-                    w.remaining_percent(),
+                    remaining_label(lang, w.remaining_percent()),
                     countdown_window(w, now, lang)
                 ),
-                None => format!("{}  {}", r.name, tr(lang, "需要处理", "needs attention")),
+                None => format!("{}  {}", r.name, tr(lang, "需要处理", "needs attention", "要対応", "확인 필요")),
             };
             menu.append(&MenuItem::with_id(app, format!("p:{}", r.id.slug()), line, false, None::<&str>)?)?;
             any = true;
@@ -85,11 +99,11 @@ fn build_menu(app: &AppHandle, snap: Option<&AppSnapshot>, lang: Lang) -> tauri:
             menu.append(&PredefinedMenuItem::separator(app)?)?;
         }
     }
-    menu.append(&MenuItem::with_id(app, "open", tr(lang, "打开面板", "Open panel"), true, None::<&str>)?)?;
-    menu.append(&MenuItem::with_id(app, "refresh", tr(lang, "立即刷新", "Refresh now"), true, None::<&str>)?)?;
-    menu.append(&MenuItem::with_id(app, "settings", tr(lang, "设置…", "Settings…"), true, None::<&str>)?)?;
+    menu.append(&MenuItem::with_id(app, "open", tr(lang, "打开面板", "Open panel", "パネルを開く", "패널 열기"), true, None::<&str>)?)?;
+    menu.append(&MenuItem::with_id(app, "refresh", tr(lang, "立即刷新", "Refresh now", "今すぐ更新", "지금 새로고침"), true, None::<&str>)?)?;
+    menu.append(&MenuItem::with_id(app, "settings", tr(lang, "设置…", "Settings…", "設定…", "설정…"), true, None::<&str>)?)?;
     menu.append(&PredefinedMenuItem::separator(app)?)?;
-    menu.append(&MenuItem::with_id(app, "quit", tr(lang, "退出", "Quit"), true, None::<&str>)?)?;
+    menu.append(&MenuItem::with_id(app, "quit", tr(lang, "退出", "Quit", "終了", "종료"), true, None::<&str>)?)?;
     Ok(menu)
 }
 
@@ -250,7 +264,7 @@ pub fn update(app: &AppHandle, snap: &AppSnapshot) {
                 w.remaining_percent(),
                 countdown_window(w, now, lang)
             )),
-            _ => tip.push(format!("{}: {}", r.name, tr(lang, "需要处理", "needs attention"))),
+            _ => tip.push(format!("{}: {}", r.name, tr(lang, "需要处理", "needs attention", "要対応", "확인 필요"))),
         }
     }
     let _ = tray.set_tooltip(Some(tip.join("\n")));
@@ -346,7 +360,7 @@ pub fn open_settings(app: &AppHandle) {
     }
     let lang = app.state::<AppState>().settings.lock().unwrap().lang();
     let _ = WebviewWindowBuilder::new(app, "settings", WebviewUrl::App("index.html#/settings".into()))
-        .title(tr(lang, "CodexUsageBar 设置", "CodexUsageBar Settings"))
+        .title(settings_title(lang))
         .inner_size(780.0, 580.0)
         .min_inner_size(640.0, 480.0)
         .center()

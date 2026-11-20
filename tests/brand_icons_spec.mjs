@@ -18,10 +18,17 @@ const EXPECTED_PROVIDERS = [
   "minimax",
   "opencode",
   "codebuff",
+  "workbuddy",
+  "kiro",
+  "commandcode",
+  "volcengine",
+  "bailian",
+  "qianfan",
+  "qoder",
 ];
 
-test("brand_icons: all 15 official AI providers have vector logo definitions", () => {
-  assert.equal(Object.keys(BRAND_ICONS).length, 15);
+test("brand_icons: all 22 official AI providers have vector logo definitions", () => {
+  assert.equal(Object.keys(BRAND_ICONS).length, 22);
   for (const id of EXPECTED_PROVIDERS) {
     const icon = BRAND_ICONS[id];
     assert.ok(icon, `Provider ${id} should have a brand icon definition`);
@@ -130,4 +137,18 @@ test("brand_icons: codebuff matches official terminal mark geometry", () => {
   const codebuff = BRAND_ICONS.codebuff;
   assert.equal(codebuff.viewBox, "0 0 514 514");
   assert.equal(codebuff.paths.length, 2);
+});
+
+test("brand_icons: workbuddy has crisp geometric W emblem", () => {
+  const wb = BRAND_ICONS.workbuddy;
+  assert.equal(wb.viewBox, "0 0 24 24");
+  assert.equal(wb.paths.length, 1);
+});
+
+test("brand_icons: kiro and commandcode have valid vector icons", () => {
+  for (const id of ["kiro", "commandcode", "volcengine", "bailian", "qianfan", "qoder"]) {
+    const icon = BRAND_ICONS[id];
+    assert.equal(icon.viewBox, "0 0 24 24");
+    assert.equal(icon.paths.length, 1);
+  }
 });

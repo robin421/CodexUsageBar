@@ -229,6 +229,12 @@ fn alert_text(
         (Lang::En, AlertKind::Warning) => (format!("{provider} is below {warn:.0}%"), format!("{name}: {left}% left, {when}")),
         (Lang::En, AlertKind::Critical) => (format!("{provider} is almost out"), format!("{name}: {left}% left, {when}")),
         (Lang::En, AlertKind::Restored) => (format!("{provider} quota restored"), format!("{name} has reset: {left}% left")),
+        (Lang::Ja, AlertKind::Warning) => (format!("{provider} の残量が {warn:.0}% を下回りました"), format!("{name} の残り {left}%。{when}")),
+        (Lang::Ja, AlertKind::Critical) => (format!("{provider} の残量がわずかです"), format!("{name} は残り {left}%（{crit:.0}% 未満）。{when}")),
+        (Lang::Ja, AlertKind::Restored) => (format!("{provider} の枠がリセットされました"), format!("{name} がリセットされ、残り {left}% です")),
+        (Lang::Ko, AlertKind::Warning) => (format!("{provider} 잔여량이 {warn:.0}% 미만입니다"), format!("{name} 남음 {left}%. {when}")),
+        (Lang::Ko, AlertKind::Critical) => (format!("{provider} 잔여량이 거의 없습니다"), format!("{name} 남음 {left}% ({crit:.0}% 미만). {when}")),
+        (Lang::Ko, AlertKind::Restored) => (format!("{provider} 한도가 초기화되었습니다"), format!("{name} 초기화됨. 현재 {left}% 남음")),
     }
 }
 

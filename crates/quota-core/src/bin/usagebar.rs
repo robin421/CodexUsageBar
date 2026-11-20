@@ -1,4 +1,4 @@
-//! `usagebar [--json] [--all] [--en]` — print quotas for every provider logged in on this machine.
+//! `usagebar [--json] [--all] [--en|--ja|--ko]` — print quotas for every provider logged in on this machine.
 
 use std::collections::{HashMap, HashSet};
 
@@ -10,7 +10,15 @@ use quota_core::{refresh_all, Ctx, Issue, Status};
 async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let has = |f: &str| args.iter().any(|a| a == f);
-    let lang = if has("--en") { Lang::En } else { Lang::Zh };
+    let lang = if has("--ja") {
+        Lang::Ja
+    } else if has("--ko") {
+        Lang::Ko
+    } else if has("--en") {
+        Lang::En
+    } else {
+        Lang::Zh
+    };
 
     let ctx = Ctx::new(HashMap::new()).await;
     let reports = refresh_all(&ctx, &HashSet::new(), &HashMap::new()).await;

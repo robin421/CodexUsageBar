@@ -12,8 +12,11 @@ const zh = {
   resetSoon: "即将重置",
   resetDone: "已重置",
   usedPct: "已用 {pct}%",
-  resetsAtPrefix: "重置于 {time}",
-  pacePrefix: "配速 {pace}",
+  resetsAtPrefix: "{time} 重置",
+  paceAhead: "比匀速快 {n}%",
+  paceBehind: "比匀速慢 {n}%",
+  paceEven: "节奏正常",
+  underOneMin: "不到 1 分钟",
 };
 
 const en = {
@@ -27,7 +30,10 @@ const en = {
   resetDone: "has reset",
   usedPct: "{pct}% used",
   resetsAtPrefix: "Resets {time}",
-  pacePrefix: "Pace {pace}",
+  paceAhead: "{n}% ahead of pace",
+  paceBehind: "{n}% behind pace",
+  paceEven: "on pace",
+  underOneMin: "under 1 min",
 };
 
 function translate(lang, key, params = {}) {
@@ -119,16 +125,22 @@ function formatRelativeCountdown(resetsAt, now, lang) {
   const isZh = lang === "zh";
 
   if (ms <= 0) return translate(lang, "resetDone");
-  if (ms < 60_000) return translate(lang, "resetSoon");
+  if (ms < 60_000) return translate(lang, "underOneMin");
 
   const mins = Math.floor(ms / 60_000);
   const d = Math.floor(mins / 1440);
   const h = Math.floor((mins % 1440) / 60);
   const m = mins % 60;
 
-  if (d > 0) return isZh ? `${d} 天后` : `in ${d} ${d === 1 ? "day" : "days"}`;
-  if (h > 0) return isZh ? `${h} 小时后` : `in ${h} ${h === 1 ? "hour" : "hours"}`;
-  return isZh ? `${m} 分钟后` : `in ${m} ${m === 1 ? "min" : "mins"}`;
+  if (d > 0) return isZh ? `还有 ${d} 天` : `${d} ${d === 1 ? "day" : "days"} left`;
+  if (h > 0) return isZh ? `还有 ${h} 小时` : `${h} ${h === 1 ? "hour" : "hours"} left`;
+  return isZh ? `还有 ${m} 分钟` : `${m} ${m === 1 ? "min" : "mins"} left`;
+}
+
+function formatPace(pace, lang) {
+  if (pace > 0) return translate(lang, "paceAhead", { n: pace });
+  if (pace < 0) return translate(lang, "paceBehind", { n: -pace });
+  return translate(lang, "paceEven");
 }
 
 function calcPace(w, now) {
@@ -193,8 +205,7 @@ function formatSubLine(w, now, lang) {
 
   const pace = calcPace(w, now);
   if (pace !== null) {
-    const paceStr = pace > 0 ? `+${pace}%` : `${pace}%`;
-    parts.push(translate(lang, "pacePrefix", { pace: paceStr }));
+    parts.push(formatPace(pace, lang));
   }
 
   return parts.length > 0 ? parts.join(" · ") : translate(lang, "resetsUnknown");
@@ -238,18 +249,18 @@ test("formatRelativeCountdown: concise output matching user screenshot", () => {
   const now = 1000000;
   // 4 days later: 4 * 86400 * 1000 = 345600000
   const in4d = new Date(now + 4 * 86400 * 1000 + 3600 * 1000).toISOString();
-  assert.equal(formatRelativeCountdown(in4d, now, "zh"), "4 天后");
-  assert.equal(formatRelativeCountdown(in4d, now, "en"), "in 4 days");
+  assert.equal(formatRelativeCountdown(in4d, now, "zh"), "还有 4 天");
+  assert.equal(formatRelativeCountdown(in4d, now, "en"), "4 days left");
 
   // 3 hours later
   const in3h = new Date(now + 3 * 3600 * 1000).toISOString();
-  assert.equal(formatRelativeCountdown(in3h, now, "zh"), "3 小时后");
-  assert.equal(formatRelativeCountdown(in3h, now, "en"), "in 3 hours");
+  assert.equal(formatRelativeCountdown(in3h, now, "zh"), "还有 3 小时");
+  assert.equal(formatRelativeCountdown(in3h, now, "en"), "3 hours left");
 
   // 25 mins later
   const in25m = new Date(now + 25 * 60 * 1000).toISOString();
-  assert.equal(formatRelativeCountdown(in25m, now, "zh"), "25 分钟后");
-  assert.equal(formatRelativeCountdown(in25m, now, "en"), "in 25 mins");
+  assert.equal(formatRelativeCountdown(in25m, now, "zh"), "还有 25 分钟");
+  assert.equal(formatRelativeCountdown(in25m, now, "en"), "25 mins left");
 
   // Past
   const past = new Date(now - 1000).toISOString();
@@ -299,10 +310,10 @@ test("formatSubLine: joins 3 segments with middle dot", () => {
   };
 
   const lineZh = formatSubLine(window, now, "zh");
-  assert.match(lineZh, /^重置于 周日 \d{2}:\d{2} · 4 天后 · 配速 -39%$/);
+  assert.match(lineZh, /^周日 \d{2}:\d{2} 重置 · 还有 4 天 · 比匀速慢 39%$/);
 
   const lineEn = formatSubLine(window, now, "en");
-  assert.match(lineEn, /^Resets Sun \d{2}:\d{2} · in 4 days · Pace -39%$/);
+  assert.match(lineEn, /^Resets Sun \d{2}:\d{2} · 4 days left · 39% behind pace$/);
 });
 
 test("formatSubLine: fallback when resets_at is missing", () => {
@@ -467,13 +478,13 @@ test("formatSubLine: boundary missing window_mins omits pace cleanly without tra
   };
 
   const lineZh = formatSubLine(sessionWindow, now, "zh");
-  assert.match(lineZh, /^重置于 今天 \d{2}:\d{2} · 3 小时后$/);
-  assert.ok(!lineZh.includes("配速"));
+  assert.match(lineZh, /^今天 \d{2}:\d{2} 重置 · 还有 3 小时$/);
+  assert.ok(!lineZh.includes("匀速"));
   assert.ok(!lineZh.endsWith(" · "));
 
   const lineEn = formatSubLine(sessionWindow, now, "en");
-  assert.match(lineEn, /^Resets Today \d{2}:\d{2} · in 3 hours$/);
-  assert.ok(!lineEn.includes("Pace"));
+  assert.match(lineEn, /^Resets Today \d{2}:\d{2} · 3 hours left$/);
+  assert.ok(!lineEn.includes("pace"));
   assert.ok(!lineEn.endsWith(" · "));
 });
 
@@ -499,4 +510,94 @@ test("isResetSoon: boundary checks for 24h, 1h, expired -1s, >1d 25h, and null",
   assert.equal(isResetSoon(null, now), false);
   assert.equal(isResetSoon(undefined, now), false);
   assert.equal(isResetSoon("invalid-date", now), false);
+});
+
+function representativeScope(scope) {
+  const parts = scope.split(" · ").map((s) => s.trim()).filter(Boolean);
+  if (parts.length <= 1) return scope;
+
+  const explicitFamily = (name) => {
+    const l = name.toLowerCase();
+    if (l.includes("argon")) return "argon";
+    if (l.includes("claude") || l.includes("opus") || l.includes("sonnet") || l.includes("haiku")) return "claude";
+    if (l.includes("gpt")) return "gpt";
+    if (l.includes("gemini") || l.includes("hydrogen") || l.includes("neon") || l.includes("orchestrator") || l.includes("flash") || l.includes("sonar")) return "gemini";
+    return null;
+  };
+
+  const versionOf = (name) => {
+    for (const token of name.split(/[^0-9.]+/).filter(Boolean)) {
+      if (token.includes(".")) {
+        const [a, b] = token.split(".");
+        const maj = Number(a);
+        const min = Number(b);
+        if (Number.isFinite(maj) && Number.isFinite(min) && b !== "") return [maj, min];
+      } else {
+        const n = Number(token);
+        if (Number.isFinite(n) && n < 100) return [n, 0];
+      }
+    }
+    return [0, 0];
+  };
+
+  const tierOf = (name) => {
+    const l = name.toLowerCase();
+    let tier = 20;
+    if (/ultra|opus|hydrogen|neon|sonar|orchestrator/.test(l)) tier = 40;
+    else if (/pro|sonnet/.test(l)) tier = 30;
+    else if (l.includes("gpt")) tier = 30;
+    else if (/flash|haiku/.test(l)) tier = 10;
+    if (l.includes("hydrogen") || l.includes("opus")) tier += 5;
+    else if (l.includes("neon")) tier += 4;
+    else if (l.includes("sonar")) tier += 3;
+    return tier;
+  };
+
+  const better = (a, b) => {
+    const [aMaj, aMin] = versionOf(a);
+    const [bMaj, bMin] = versionOf(b);
+    if (aMaj !== bMaj) return aMaj - bMaj;
+    if (aMin !== bMin) return aMin - bMin;
+    return tierOf(a) - tierOf(b);
+  };
+
+  const branded = (part, family, donor) => {
+    if (family === "claude" && !/claude/i.test(part) && donor && /claude/i.test(donor)) return `Claude ${part}`;
+    if (family === "gemini" && !/gemini/i.test(part) && donor && /gemini/i.test(donor)) return `Gemini ${part}`;
+    return part;
+  };
+
+  const order = [];
+  const best = new Map();
+  let lastFamily = "";
+  for (const part of parts) {
+    const family = explicitFamily(part) ?? (lastFamily || (part.split(/\s+/)[0] ?? part).toLowerCase());
+    lastFamily = family;
+    const current = best.get(family);
+    if (!current) {
+      order.push(family);
+      best.set(family, part);
+    } else if (better(part, current) > 0) {
+      best.set(family, branded(part, family, current));
+    }
+  }
+  return order.map((family) => best.get(family) ?? "").filter(Boolean).join(" · ");
+}
+
+test("representativeScope: one flagship per family", () => {
+  assert.equal(
+    representativeScope("Claude Opus 5.5 · Sonnet 5.5 · GPT-OSS 120B"),
+    "Claude Opus 5.5 · GPT-OSS 120B",
+  );
+  assert.equal(
+    representativeScope("Gemini 4 Hydrogen Sonar · 3.8 Flash · 3.5 Flash · 2.5 Flash"),
+    "Gemini 4 Hydrogen Sonar",
+  );
+  assert.equal(
+    representativeScope("Claude Sonnet 4.6 · Opus 4.6 · GPT-OSS 120B"),
+    "Claude Opus 4.6 · GPT-OSS 120B",
+  );
+  assert.equal(representativeScope("Gemini 4 Argon"), "Gemini 4 Argon");
+  assert.equal(representativeScope("Gemini Models"), "Gemini Models");
+  assert.equal(representativeScope(""), "");
 });

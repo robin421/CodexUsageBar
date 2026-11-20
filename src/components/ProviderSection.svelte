@@ -2,7 +2,7 @@
   import Icon from "./Icon.svelte";
   import Meter from "./Meter.svelte";
   import Monogram from "./Monogram.svelte";
-  import { amounts, formatSubLine, isResetSoon, levelOf, money, windowName } from "../lib/format";
+  import { amounts, formatSubLine, isResetSoon, levelOf, money, representativeScope, windowName } from "../lib/format";
   import { t } from "../lib/i18n";
   import { api } from "../lib/api";
   import { getDealUrl } from "../lib/affiliate";
@@ -143,17 +143,18 @@
       {@const level = levelOf(w, thresholds)}
       {@const amt = amounts(w, lang)}
       {@const cleanedScope = cleanScope(w.scope, report.id === "agy" ? selectedAccount : null)}
+      {@const shownScope = representativeScope(cleanedScope)}
       <div class="window" data-level={level}>
         <div class="row">
           <span class="name">
             {#if cleanedScope}
-              <span class="model-title">{cleanedScope}</span>
+              <span class="model-title" title={cleanedScope}>{shownScope}</span>
             {/if}
             <span class="window-kind">{windowName(w, lang)}</span>
           </span>
           <span class="pct">{$t("usedPct", { pct: Math.round(w.used_percent) })}</span>
         </div>
-        <Meter used={w.used_percent} {level} label={cleanedScope || windowName(w, lang)} />
+        <Meter used={w.used_percent} {level} label={shownScope || windowName(w, lang)} />
         <div class="row sub">
           <span class="when" class:soon={isResetSoon(w.resets_at, now)}>{formatSubLine(w, now, lang)}</span>
           {#if w.used_percent >= 80}

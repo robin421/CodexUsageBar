@@ -1,6 +1,41 @@
 use base64::Engine;
 use chrono::{DateTime, NaiveDate, TimeZone, Utc};
 use serde_json::Value;
+use sha2::{Digest, Sha256};
+
+/// Lowercase hex-encoded SHA-256 digest of `data`.
+pub fn sha256_hex(data: &[u8]) -> String {
+    hex::encode(Sha256::digest(data))
+}
+
+/// Standard RFC 2104 HMAC-SHA256.
+pub fn hmac_sha256(key: &[u8], data: &[u8]) -> [u8; 32] {
+    const BLOCK_SIZE: usize = 64;
+    let mut k = [0u8; BLOCK_SIZE];
+    if key.len() > BLOCK_SIZE {
+        let hashed = Sha256::digest(key);
+        k[..32].copy_from_slice(&hashed);
+    } else {
+        k[..key.len()].copy_from_slice(key);
+    }
+
+    let mut ipad = [0x36u8; BLOCK_SIZE];
+    let mut opad = [0x5cu8; BLOCK_SIZE];
+    for i in 0..BLOCK_SIZE {
+        ipad[i] ^= k[i];
+        opad[i] ^= k[i];
+    }
+
+    let mut inner = Sha256::new();
+    inner.update(ipad);
+    inner.update(data);
+    let inner_hash = inner.finalize();
+
+    let mut outer = Sha256::new();
+    outer.update(opad);
+    outer.update(inner_hash);
+    outer.finalize().into()
+}
 
 /// Accepts RFC 3339 strings, plain dates, and epoch seconds or milliseconds (as numbers or strings).
 pub fn parse_time(v: &Value) -> Option<DateTime<Utc>> {

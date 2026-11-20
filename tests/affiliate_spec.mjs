@@ -11,6 +11,9 @@ const PROVIDER_PATHS = {
   copilot: "/pricing/copilot/",
   cursor: "/pricing/",
   codebuff: "/pricing/",
+  workbuddy: "/pricing/",
+  kiro: "/pricing/",
+  commandcode: "/pricing/",
   opencode: "/pricing/",
   jetbrains: "/pricing/",
   openrouter: "/pricing/",
@@ -18,6 +21,10 @@ const PROVIDER_PATHS = {
   moonshot: "/pricing/kimi/",
   zai: "/pricing/glm/",
   minimax: "/pricing/hailuo/",
+  volcengine: "/pricing/",
+  bailian: "/pricing/",
+  qianfan: "/pricing/",
+  qoder: "/pricing/",
 };
 
 const DEFAULT_PATH = "/pricing/";
@@ -79,6 +86,9 @@ test("affiliate: all 14 provider path mappings exist and end with slash", () => 
     copilot: "/pricing/copilot/",
     cursor: "/pricing/",
     codebuff: "/pricing/",
+    workbuddy: "/pricing/",
+    kiro: "/pricing/",
+    commandcode: "/pricing/",
     opencode: "/pricing/",
     jetbrains: "/pricing/",
     openrouter: "/pricing/",
@@ -86,6 +96,10 @@ test("affiliate: all 14 provider path mappings exist and end with slash", () => 
     moonshot: "/pricing/kimi/",
     zai: "/pricing/glm/",
     minimax: "/pricing/hailuo/",
+    volcengine: "/pricing/",
+    bailian: "/pricing/",
+    qianfan: "/pricing/",
+    qoder: "/pricing/",
   };
 
   for (const [id, path] of Object.entries(expected)) {

@@ -1,7 +1,7 @@
 <script lang="ts">
   import Gauge from "./Gauge.svelte";
-  import { countdown, levelOf, remaining, resetClock, windowName } from "../lib/format";
-  import { t } from "../lib/i18n";
+  import { countdown, levelOf, remaining, representativeScope, resetClock, windowName } from "../lib/format";
+  import { t, translate } from "../lib/i18n";
   import type { Lang, Overview, ProviderReport, QuotaWindow, Thresholds } from "../lib/types";
 
   let {
@@ -105,7 +105,7 @@
         if (!win) return null;
         const rem = remaining(win);
         const liveName = win.scope
-          ? win.scope.replace(/\s*\([^)]+\)\s*$/, "").trim()
+          ? representativeScope(win.scope.replace(/\s*\([^)]+\)\s*$/, "").trim())
           : m.fallbackName;
         return {
           id: m.id,
@@ -150,7 +150,7 @@
       const shortName = currentAccount ? currentAccount.split("@")[0] : null;
       return {
         title: shortName ? `${model.name} (${shortName})` : model.name,
-        caption: lang === "zh" ? `${model.name} 额度` : `${model.name} Quota`,
+        caption: translate(lang, "quotaCaption", { name: model.name }),
         window: model.window,
         provider: agyReport,
         remaining: model.pct,
@@ -168,7 +168,7 @@
         const shortName = email.split("@")[0];
         return {
           title: `Antigravity (${shortName})`,
-          caption: lang === "zh" ? `${shortName} 额度` : `${shortName} Quota`,
+          caption: translate(lang, "quotaCaption", { name: shortName }),
           window: win,
           provider: agyReport,
           remaining: rem,
@@ -193,7 +193,7 @@
         const rem = remaining(win);
         return {
           title: provider.name,
-          caption: lang === "zh" ? `${provider.name} 额度` : `${provider.name} Quota`,
+          caption: translate(lang, "quotaCaption", { name: provider.name }),
           window: win,
           provider: provider,
           remaining: rem,
@@ -206,10 +206,10 @@
     const w = overview.tightest_window;
     const bestProvider = reports.find((r) => r.id === overview.tightest_provider);
     return {
-      title: bestProvider?.name ?? (lang === "zh" ? "总体额度" : "Overview"),
+      title: bestProvider?.name ?? translate(lang, "overviewTitle"),
       caption: overview.level === "normal"
-        ? (lang === "zh" ? "当前可用额度" : "Available Headroom")
-        : (lang === "zh" ? "余量最低" : "Lowest Headroom"),
+        ? translate(lang, "availableHeadroom")
+        : translate(lang, "lowestHeadroom"),
       window: w,
       provider: bestProvider,
       remaining: overview.min_remaining,
@@ -268,7 +268,7 @@
         <h2>{current.title}</h2>
         <p class="window">
           {windowName(w, lang)}
-          {#if w.scope}<span class="scope">{cleanScope(w.scope, currentAccount)}</span>{/if}
+          {#if w.scope}<span class="scope" title={cleanScope(w.scope, currentAccount)}>{representativeScope(cleanScope(w.scope, currentAccount))}</span>{/if}
         </p>
         <p class="when">{countdown(w.resets_at, now, lang, current.remaining)}</p>
         {#if w.resets_at}<p class="clock">{resetClock(w.resets_at, now, lang)}</p>{/if}
@@ -283,7 +283,7 @@
           class:active={selectedFilter === "all"}
           onclick={() => select("all")}
         >
-          <span class="tool-name">{lang === "zh" ? "全部" : "All"}</span>
+          <span class="tool-name">{translate(lang, "allTools")}</span>
         </button>
 
         {#each activeTools as tool (tool.id)}
@@ -306,7 +306,7 @@
       <div class="sub-strip">
         {#if agyAccounts.length > 1}
           <div class="account-group">
-            <span class="group-label">{lang === "zh" ? "账号" : "Account"}:</span>
+            <span class="group-label">{translate(lang, "accountLabel")}:</span>
             {#each agyAccounts as acc (acc)}
               {@const isCurActive = activeAgyAccount === acc}
               {@const isSelected = currentAccount === acc}
@@ -316,10 +316,10 @@
                 class:active={isSelected}
                 class:is-active-cli={isCurActive}
                 onclick={() => selectAccount(acc)}
-                title="{acc} {isCurActive ? (lang === 'zh' ? '(当前CLI活动账号)' : '(Current CLI active)') : ''}"
+                title="{acc} {isCurActive ? translate(lang, 'cliActiveSuffix') : ''}"
               >
                 <span class="acc-name">{acc.split('@')[0]}</span>
-                {#if isCurActive}<span class="active-badge" title={lang === 'zh' ? '当前CLI账号' : 'Active CLI account'}>CLI</span>{/if}
+                {#if isCurActive}<span class="active-badge" title={translate(lang, "cliActiveBadge")}>CLI</span>{/if}
               </button>
             {/each}
             {#if onSwitchAccount && currentAccount}
@@ -328,9 +328,9 @@
                   type="button"
                   class="btn-switch-cli"
                   onclick={() => onSwitchAccount(currentAccount)}
-                  title={lang === "zh" ? "将此账号设为 Antigravity CLI 活跃账号" : "Set as active Antigravity CLI account"}
+                  title={translate(lang, "setActiveTitle")}
                 >
-                  {lang === "zh" ? "设为活动账号" : "Set as Active"}
+                  {translate(lang, "setActive")}
                 </button>
               {/if}
             {/if}

@@ -14,6 +14,9 @@ const PROVIDER_PATHS: Record<string, string> = {
   copilot: "/pricing/copilot/",
   cursor: "/pricing/",
   codebuff: "/pricing/",
+  workbuddy: "/pricing/",
+  kiro: "/pricing/",
+  commandcode: "/pricing/",
   opencode: "/pricing/",
   jetbrains: "/pricing/",
   openrouter: "/pricing/",
@@ -21,6 +24,10 @@ const PROVIDER_PATHS: Record<string, string> = {
   moonshot: "/pricing/kimi/",
   zai: "/pricing/glm/",
   minimax: "/pricing/hailuo/",
+  volcengine: "/pricing/",
+  bailian: "/pricing/",
+  qianfan: "/pricing/",
+  qoder: "/pricing/",
 };
 
 const DEFAULT_PATH = "/pricing/";

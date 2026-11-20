@@ -14,11 +14,18 @@ pub enum ProviderId {
     Cursor,
     Jetbrains,
     Codebuff,
+    Workbuddy,
+    Kiro,
+    Commandcode,
     Openrouter,
     Deepseek,
     Moonshot,
     Zai,
     Minimax,
+    Volcengine,
+    Bailian,
+    Qianfan,
+    Qoder,
 }
 
 /// How a provider authenticates: reusing a local CLI/app login, or an API key the user supplies.
@@ -30,7 +37,7 @@ pub enum AuthKind {
 }
 
 impl ProviderId {
-    pub const ALL: [ProviderId; 14] = [
+    pub const ALL: [ProviderId; 21] = [
         ProviderId::Codex,
         ProviderId::Claude,
         ProviderId::Agy,
@@ -40,11 +47,18 @@ impl ProviderId {
         ProviderId::Cursor,
         ProviderId::Jetbrains,
         ProviderId::Codebuff,
+        ProviderId::Workbuddy,
+        ProviderId::Kiro,
+        ProviderId::Commandcode,
         ProviderId::Openrouter,
         ProviderId::Deepseek,
         ProviderId::Moonshot,
         ProviderId::Zai,
         ProviderId::Minimax,
+        ProviderId::Volcengine,
+        ProviderId::Bailian,
+        ProviderId::Qianfan,
+        ProviderId::Qoder,
     ];
 
     pub fn slug(self) -> &'static str {
@@ -58,11 +72,18 @@ impl ProviderId {
             ProviderId::Cursor => "cursor",
             ProviderId::Jetbrains => "jetbrains",
             ProviderId::Codebuff => "codebuff",
+            ProviderId::Workbuddy => "workbuddy",
+            ProviderId::Kiro => "kiro",
+            ProviderId::Commandcode => "commandcode",
             ProviderId::Openrouter => "openrouter",
             ProviderId::Deepseek => "deepseek",
             ProviderId::Moonshot => "moonshot",
             ProviderId::Zai => "zai",
             ProviderId::Minimax => "minimax",
+            ProviderId::Volcengine => "volcengine",
+            ProviderId::Bailian => "bailian",
+            ProviderId::Qianfan => "qianfan",
+            ProviderId::Qoder => "qoder",
         }
     }
 
@@ -84,11 +105,18 @@ impl ProviderId {
             ProviderId::Cursor => "Cursor",
             ProviderId::Jetbrains => "JetBrains AI",
             ProviderId::Codebuff => "Codebuff",
+            ProviderId::Workbuddy => "WorkBuddy",
+            ProviderId::Kiro => "Kiro",
+            ProviderId::Commandcode => "Command Code",
             ProviderId::Openrouter => "OpenRouter",
             ProviderId::Deepseek => "DeepSeek",
             ProviderId::Moonshot => "Moonshot / Kimi",
             ProviderId::Zai => "Z.ai / GLM",
             ProviderId::Minimax => "MiniMax",
+            ProviderId::Volcengine => "Doubao / Ark",
+            ProviderId::Bailian => "Bailian / Qwen",
+            ProviderId::Qianfan => "Qianfan",
+            ProviderId::Qoder => "Qoder",
         }
     }
 
@@ -98,7 +126,11 @@ impl ProviderId {
             | ProviderId::Deepseek
             | ProviderId::Moonshot
             | ProviderId::Zai
-            | ProviderId::Minimax => AuthKind::ApiKey,
+            | ProviderId::Minimax
+            | ProviderId::Volcengine
+            | ProviderId::Bailian
+            | ProviderId::Qianfan
+            | ProviderId::Qoder => AuthKind::ApiKey,
             _ => AuthKind::Local,
         }
     }
@@ -121,6 +153,8 @@ impl ProviderId {
             ProviderId::Copilot => Some("gh auth login"),
             ProviderId::Opencode => Some("opencode auth login"),
             ProviderId::Codebuff => Some("codebuff login"),
+            ProviderId::Kiro => Some("kiro-cli login"),
+            ProviderId::Commandcode => Some("commandcode login"),
             _ => None,
         }
     }
@@ -137,6 +171,10 @@ impl ProviderId {
             ProviderId::Minimax => &["MINIMAX_API_KEY"],
             ProviderId::Codebuff => &["CODEBUFF_API_KEY"],
             ProviderId::Opencode => &["OPENCODE_API_KEY"],
+            ProviderId::Volcengine => &["VOLC_ACCESSKEY", "ARK_API_KEY"],
+            ProviderId::Bailian => &["ALIBABA_CLOUD_ACCESS_KEY_ID", "DASHSCOPE_API_KEY"],
+            ProviderId::Qianfan => &["QIANFAN_COOKIE", "QIANFAN_TOKEN"],
+            ProviderId::Qoder => &["QODER_TOKEN", "QODER_COOKIE"],
             _ => &[],
         }
     }
@@ -152,11 +190,18 @@ impl ProviderId {
             ProviderId::Cursor => "https://cursor.com/dashboard?tab=usage",
             ProviderId::Jetbrains => "https://account.jetbrains.com/licenses",
             ProviderId::Codebuff => "https://www.codebuff.com/usage",
+            ProviderId::Workbuddy => "https://www.workbuddy.cn/profile/usage",
+            ProviderId::Kiro => "https://app.kiro.dev/account/usage",
+            ProviderId::Commandcode => "https://commandcode.ai/",
             ProviderId::Openrouter => "https://openrouter.ai/settings/credits",
             ProviderId::Deepseek => "https://platform.deepseek.com/usage",
             ProviderId::Moonshot => "https://platform.moonshot.ai/console/account",
             ProviderId::Zai => "https://z.ai/manage-apikey/coding-plan/personal/my-plan",
             ProviderId::Minimax => "https://platform.minimax.io/user-center/payment/coding-plan",
+            ProviderId::Volcengine => "https://console.volcengine.com/ark",
+            ProviderId::Bailian => "https://bailian.console.aliyun.com/",
+            ProviderId::Qianfan => "https://console.bce.baidu.com/qianfan",
+            ProviderId::Qoder => "https://qoder.com/",
         }
     }
 }

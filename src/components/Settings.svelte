@@ -63,6 +63,12 @@
     update({ disabled: [...set] });
   }
 
+  function keyPlaceholderFor(id: ProviderId): string {
+    if (id === "volcengine" || id === "bailian") return $t("keyPlaceholderAkSk");
+    if (id === "qianfan" || id === "qoder") return $t("keyPlaceholderCookieToken");
+    return $t("keyPlaceholder");
+  }
+
   async function saveKey(id: ProviderId, key: string | null) {
     saving = id;
     try {
@@ -143,6 +149,8 @@
             <option value="auto">{$t("langAuto")}</option>
             <option value="zh">{$t("langZh")}</option>
             <option value="en">{$t("langEn")}</option>
+            <option value="ja">{$t("langJa")}</option>
+            <option value="ko">{$t("langKo")}</option>
           </select>
         </label>
         <div class="field">
@@ -225,7 +233,7 @@
                 type="password"
                 autocomplete="off"
                 spellcheck="false"
-                placeholder={$t("keyPlaceholder")}
+                placeholder={keyPlaceholderFor(r.id)}
                 aria-label="{r.name} API Key"
                 bind:value={drafts[r.id]}
               />

@@ -28,7 +28,8 @@
   $effect(() => {
     if (!snap) return;
     lang.set(snap.settings.resolved_language);
-    document.documentElement.lang = snap.settings.resolved_language === "zh" ? "zh-CN" : "en";
+    const htmlLang = { zh: "zh-CN", ja: "ja", ko: "ko", en: "en" } as const;
+    document.documentElement.lang = htmlLang[snap.settings.resolved_language];
     const theme = snap.settings.theme === "system" ? (systemDark ? "dark" : "light") : snap.settings.theme;
     document.documentElement.dataset.theme = theme;
   });

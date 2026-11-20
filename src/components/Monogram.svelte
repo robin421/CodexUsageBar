@@ -71,6 +71,13 @@
   .brand-minimax { color: #f43f5e; }
   .brand-opencode { color: #10b981; }
   .brand-codebuff { color: #16a34a; }
+  .brand-workbuddy { color: #0ea5e9; }
+  .brand-kiro { color: #8b5cf6; }
+  .brand-commandcode { color: #14b8a6; }
+  .brand-volcengine { color: #1664ff; }
+  .brand-bailian { color: #ff6a00; }
+  .brand-qianfan { color: #2932e1; }
+  .brand-qoder { color: #10b981; }
 
   /* grok and cursor keep pure crisp monochrome currentColor */
   .brand-grok, .brand-cursor { color: var(--ink); }
@@ -89,6 +96,13 @@
   :global(:root[data-theme="dark"]) .brand-minimax { color: #fb7185; }
   :global(:root[data-theme="dark"]) .brand-opencode { color: #34d399; }
   :global(:root[data-theme="dark"]) .brand-codebuff { color: #4ade80; }
+  :global(:root[data-theme="dark"]) .brand-workbuddy { color: #38bdf8; }
+  :global(:root[data-theme="dark"]) .brand-kiro { color: #a78bfa; }
+  :global(:root[data-theme="dark"]) .brand-commandcode { color: #2dd4bf; }
+  :global(:root[data-theme="dark"]) .brand-volcengine { color: #60a5fa; }
+  :global(:root[data-theme="dark"]) .brand-bailian { color: #fb923c; }
+  :global(:root[data-theme="dark"]) .brand-qianfan { color: #818cf8; }
+  :global(:root[data-theme="dark"]) .brand-qoder { color: #34d399; }
   :global(:root[data-theme="dark"]) .brand-grok,
   :global(:root[data-theme="dark"]) .brand-cursor { color: var(--ink); }
 </style>

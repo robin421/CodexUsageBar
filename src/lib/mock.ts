@@ -1,7 +1,7 @@
 // Browser-only stand-in for the Tauri backend so every UI state can be previewed and screenshotted.
 // Pick a scenario with ?mock=rich|calm|critical|empty|loading|failed, theme with ?theme=light|dark.
 
-import type { AppSnapshot, DiagnosticEntry, ProviderId, ProviderReport, QuotaWindow, SettingsView, Snapshot } from "./types";
+import type { AppSnapshot, DiagnosticEntry, Lang, ProviderId, ProviderReport, QuotaWindow, SettingsView, Snapshot } from "./types";
 
 const H = 3600_000;
 const at = (ms: number) => new Date(Date.now() + ms).toISOString();
@@ -13,10 +13,11 @@ function w(id: string, mins: number | null, used: number, resetIn: number | null
 
 const NAMES: Record<ProviderId, string> = {
   codex: "Codex", claude: "Claude Code", agy: "Antigravity", gemini: "Antigravity", grok: "Grok", copilot: "GitHub Copilot", opencode: "OpenCode Go",
-  cursor: "Cursor", jetbrains: "JetBrains AI", codebuff: "Codebuff", openrouter: "OpenRouter", deepseek: "DeepSeek",
+  cursor: "Cursor", jetbrains: "JetBrains AI", codebuff: "Codebuff", workbuddy: "WorkBuddy", kiro: "Kiro", commandcode: "Command Code", openrouter: "OpenRouter", deepseek: "DeepSeek",
   moonshot: "Moonshot / Kimi", zai: "Z.ai / GLM", minimax: "MiniMax",
+  volcengine: "Doubao / Ark", bailian: "Bailian / Qwen", qianfan: "Qianfan", qoder: "Qoder",
 };
-const KEYED: ProviderId[] = ["openrouter", "deepseek", "moonshot", "zai", "minimax"];
+const KEYED: ProviderId[] = ["openrouter", "deepseek", "moonshot", "zai", "minimax", "volcengine", "bailian", "qianfan", "qoder"];
 
 function report(id: ProviderId, status: ProviderReport["status"], snap: Partial<Snapshot> | null, issue: ProviderReport["issue"] = null): ProviderReport {
   return {
@@ -89,7 +90,7 @@ function scenario(name: string): ProviderReport[] {
 }
 
 const params = new URLSearchParams(typeof location !== "undefined" ? location.search : "");
-const lang = (params.get("lang") as "zh" | "en") ?? "zh";
+const lang = (params.get("lang") as Lang) ?? "zh";
 
 let settings: SettingsView = {
   refresh_secs: 300, display: "icon_only", thresholds: { warning: 20, critical: 10 }, notify: true, notify_restored: true,

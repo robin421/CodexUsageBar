@@ -17,7 +17,7 @@
 - **预警通知**：低于 20% / 10%（可调）时发系统通知，同一重置周期内只提醒一次；额度重置后可选提醒。
 - **离线可用**：启动即显示上次的数据；网络失败时标记“数据已过期”而不是清空。
 - **自动刷新**：1 / 5 / 15 / 30 分钟，睡眠唤醒后立即刷新，打开面板时数据超过 1 分钟也会刷新。
-- 开机自启、浅色 / 深色 / 跟随系统、简体中文 / English。
+- 开机自启、浅色 / 深色 / 跟随系统、简体中文 / English / 日本語 / 한국어。
 
 <img src="docs/tray-icons.png" width="540" alt="托盘图标状态：正常、预警、告急、过期、空闲、错误（彩色与 macOS 模板两种样式）" />
 
@@ -66,7 +66,7 @@
 ```bash
 cargo run -p quota-core --bin usagebar            # 人类可读
 cargo run -p quota-core --bin usagebar -- --json  # JSON
-cargo run -p quota-core --bin usagebar -- --all --en
+cargo run -p quota-core --bin usagebar -- --all --en   # 也可用 --ja / --ko
 ```
 
 ## 开发
@@ -84,7 +84,7 @@ npm run check          # 前端类型检查
 只调界面时可以直接 `npm run dev`，在浏览器打开 `http://localhost:1420/`，会使用内置的模拟数据：
 
 - `?mock=rich|calm|critical|empty|loading|failed` 切换场景
-- `&theme=light|dark`、`&lang=zh|en`
+- `&theme=light|dark`、`&lang=zh|en|ja|ko`
 - `#/settings/general|providers|alerts|advanced` 打开设置页
 
 ### 目录结构

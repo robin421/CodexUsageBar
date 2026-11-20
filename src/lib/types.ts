@@ -2,7 +2,7 @@
 
 export type ProviderId =
   | "codex" | "claude" | "agy" | "gemini" | "grok" | "copilot" | "opencode" | "cursor" | "jetbrains"
-  | "codebuff" | "openrouter" | "deepseek" | "moonshot" | "zai" | "minimax";
+  | "codebuff" | "workbuddy" | "kiro" | "commandcode" | "openrouter" | "deepseek" | "moonshot" | "zai" | "minimax" | "volcengine" | "bailian" | "qianfan" | "qoder";
 
 export type WindowKind = "session" | "daily" | "weekly" | "monthly" | "other";
 export type Level = "normal" | "warning" | "critical";
@@ -72,7 +72,7 @@ export interface Overview {
 }
 
 export type DisplayMode = "full" | "compact" | "icon_only";
-export type Lang = "zh" | "en";
+export type Lang = "zh" | "en" | "ja" | "ko";
 
 export interface Thresholds {
   warning: number;

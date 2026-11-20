@@ -162,17 +162,12 @@ fn finalize_combined_snapshot(
     mut combined: Snapshot,
     succeeded_accounts: &[String],
     has_pro: bool,
-    is_multi_account: bool,
+    _is_multi_account: bool,
     last_err: Option<FetchError>,
     active_account: Option<&str>,
 ) -> Result<Snapshot> {
     if succeeded_accounts.is_empty() {
         return Err(last_err.unwrap_or_else(|| FetchError::parse("no active quota buckets found")));
-    }
-
-    // Ensure every succeeded account has all standard models (Gemini Models, Gemini 4 Argon, Claude & GPT)
-    for email in succeeded_accounts {
-        ensure_account_models_complete(&mut combined, email, is_multi_account);
     }
 
     if combined.windows.is_empty() {
@@ -199,20 +194,18 @@ fn finalize_combined_snapshot(
     Ok(combined)
 }
 
+#[cfg(test)]
 fn is_argon_scope(scope: &str) -> bool {
     scope.contains("Argon")
 }
 
+#[cfg(test)]
 fn is_gemini_scope(scope: &str) -> bool {
     !is_argon_scope(scope)
         && (scope.contains("Gemini")
             || scope.contains("Neon")
             || scope.contains("Hydrogen")
             || scope.contains("Flash"))
-}
-
-fn is_claude_scope(scope: &str) -> bool {
-    scope.contains("Claude") || scope.contains("GPT")
 }
 
 /// Format a concise, live-updating display scope from LS `displayName` and `description`.
@@ -264,10 +257,10 @@ pub fn format_dynamic_scope(group_name: &str, description: Option<&str>) -> Stri
     };
     let prefix1 = first_words.first().map(|w| format!("{w} "));
 
-    let mut parts = Vec::with_capacity(2);
+    let mut parts = Vec::with_capacity(models.len());
     parts.push(models[0].clone());
 
-    for m in models.iter().skip(1).take(1) {
+    for m in models.iter().skip(1) {
         let shortened = if let Some(ref p2) = prefix2 {
             if let Some(rest) = m.strip_prefix(p2.as_str()) {
                 rest.trim()
@@ -288,82 +281,6 @@ pub fn format_dynamic_scope(group_name: &str, description: Option<&str>) -> Stri
     }
 
     parts.join(" · ")
-}
-
-fn ensure_account_models_complete(
-    combined: &mut Snapshot,
-    email: &str,
-    is_multi_account: bool,
-) {
-    let short_id = email.split('@').next().unwrap_or(email);
-
-    // Prefer an existing weekly reset time from this account, or fallback to any known weekly reset
-    let existing_weekly_reset = combined
-        .windows
-        .iter()
-        .find(|w| w.account.as_deref() == Some(email) && w.kind == WindowKind::Weekly && w.resets_at.is_some())
-        .or_else(|| combined.windows.iter().find(|w| w.kind == WindowKind::Weekly && w.resets_at.is_some()))
-        .and_then(|w| w.resets_at);
-
-    let has_flash_weekly = combined.windows.iter().any(|w| {
-        w.account.as_deref() == Some(email)
-            && w.scope.as_deref().is_some_and(is_gemini_scope)
-            && w.kind == WindowKind::Weekly
-    });
-    let has_flash_5h = combined.windows.iter().any(|w| {
-        w.account.as_deref() == Some(email)
-            && w.scope.as_deref().is_some_and(is_gemini_scope)
-            && w.kind == WindowKind::Session
-    });
-    let has_claude_weekly = combined.windows.iter().any(|w| {
-        w.account.as_deref() == Some(email)
-            && w.scope.as_deref().is_some_and(is_claude_scope)
-            && w.kind == WindowKind::Weekly
-    });
-    let has_claude_5h = combined.windows.iter().any(|w| {
-        w.account.as_deref() == Some(email)
-            && w.scope.as_deref().is_some_and(is_claude_scope)
-            && w.kind == WindowKind::Session
-    });
-
-    let fmt_scope = |base: &str| -> String {
-        if is_multi_account {
-            format!("{base} ({short_id})")
-        } else {
-            base.to_string()
-        }
-    };
-
-    if !has_flash_5h {
-        let mut w = QuotaWindow::new(format!("{short_id}_gemini-5h"), Some(300), 0.0)
-            .kind(WindowKind::Session)
-            .scope(fmt_scope("Gemini Models"));
-        w.account = Some(email.to_string());
-        combined.windows.push(w);
-    }
-    if !has_flash_weekly {
-        let mut w = QuotaWindow::new(format!("{short_id}_gemini-weekly"), Some(10080), 0.0)
-            .kind(WindowKind::Weekly)
-            .resets_at(existing_weekly_reset)
-            .scope(fmt_scope("Gemini Models"));
-        w.account = Some(email.to_string());
-        combined.windows.push(w);
-    }
-    if !has_claude_5h {
-        let mut w = QuotaWindow::new(format!("{short_id}_3p-5h"), Some(300), 0.0)
-            .kind(WindowKind::Session)
-            .scope(fmt_scope("Claude & GPT"));
-        w.account = Some(email.to_string());
-        combined.windows.push(w);
-    }
-    if !has_claude_weekly {
-        let mut w = QuotaWindow::new(format!("{short_id}_3p-weekly"), Some(10080), 0.0)
-            .kind(WindowKind::Weekly)
-            .resets_at(existing_weekly_reset)
-            .scope(fmt_scope("Claude & GPT"));
-        w.account = Some(email.to_string());
-        combined.windows.push(w);
-    }
 }
 
 async fn get_ls_account_email(ctx: &Ctx, ls_addr: &str, csrf: &str) -> Option<String> {
@@ -556,14 +473,15 @@ async fn fetch_from_ls(ctx: &Ctx, ls_addr: &str, csrf: &str) -> Result<Snapshot>
     Ok(snap)
 }
 
+#[cfg(test)]
 fn has_gemini_window(snap: &Snapshot) -> bool {
     snap.windows
         .iter()
         .any(|w| w.scope.as_deref().is_some_and(is_gemini_scope))
 }
 
-async fn fetch_daily_gemini_quota(ctx: &Ctx, access_token: &str) -> Option<QuotaWindow> {
-    let resp = ctx
+async fn fetch_daily_quotas(ctx: &Ctx, access_token: &str) -> Vec<QuotaWindow> {
+    let resp = match ctx
         .http
         .post(CCPA_DAILY_QUOTA_ENDPOINT)
         .header("Authorization", format!("Bearer {access_token}"))
@@ -572,26 +490,68 @@ async fn fetch_daily_gemini_quota(ctx: &Ctx, access_token: &str) -> Option<Quota
         .body(r#"{"project":"aicode-consumers"}"#)
         .send()
         .await
-        .ok()?;
+    {
+        Ok(r) => r,
+        Err(_) => return Vec::new(),
+    };
 
     if !resp.status().is_success() {
-        return None;
+        return Vec::new();
     }
 
-    let body: Value = resp.json().await.ok()?;
-    parse_daily_gemini_quota(&body)
+    let body: Value = match resp.json().await {
+        Ok(b) => b,
+        Err(_) => return Vec::new(),
+    };
+    parse_daily_quotas(&body)
+}
+
+fn normalize_daily_model_base(model_id: &str) -> String {
+    const SUFFIXES: &[&str] = &[
+        "-xhigh",
+        "-high",
+        "-medium",
+        "-low",
+        "-minimal",
+        "-max",
+        "-none",
+        "-thinking",
+        "-tiered",
+        "-lite",
+    ];
+    let mut base = model_id.trim().to_ascii_lowercase();
+    loop {
+        let mut stripped = false;
+        for suffix in SUFFIXES {
+            if let Some(rest) = base.strip_suffix(suffix) {
+                if !rest.is_empty() {
+                    base = rest.to_string();
+                    stripped = true;
+                    break;
+                }
+            }
+        }
+        if !stripped {
+            break;
+        }
+    }
+    base
 }
 
 fn format_model_id_scope(model_id: &str) -> String {
     let parts: Vec<String> = model_id
         .split('-')
         .filter(|p| !p.is_empty())
-        .take(3)
-        .map(|p| {
-            let mut chars = p.chars();
-            match chars.next() {
-                Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
-                None => String::new(),
+        .map(|p| match p.to_ascii_lowercase().as_str() {
+            "gpt" => "GPT".to_string(),
+            "oss" => "OSS".to_string(),
+            "120b" => "120B".to_string(),
+            _ => {
+                let mut chars = p.chars();
+                match chars.next() {
+                    Some(first) => format!("{}{}", first.to_ascii_uppercase(), chars.as_str()),
+                    None => String::new(),
+                }
             }
         })
         .collect();
@@ -602,59 +562,229 @@ fn format_model_id_scope(model_id: &str) -> String {
     }
 }
 
-pub fn parse_daily_gemini_quota(body: &Value) -> Option<QuotaWindow> {
-    let buckets = body
+fn gemini_version_key(base_id: &str) -> (u32, u32, u8) {
+    let mut major = 0u32;
+    let mut minor = 0u32;
+    for part in base_id.split('-') {
+        if let Some((maj_s, min_s)) = part.split_once('.') {
+            if let (Ok(maj), Ok(min)) = (maj_s.parse::<u32>(), min_s.parse::<u32>()) {
+                major = maj;
+                minor = min;
+                break;
+            }
+        } else if let Ok(maj) = part.parse::<u32>() {
+            major = maj;
+            break;
+        }
+    }
+    let importance = if base_id.contains("neon")
+        || base_id.contains("hydrogen")
+        || base_id.contains("orchestrator")
+        || base_id.contains("sonar")
+    {
+        3
+    } else if base_id.contains("pro") {
+        2
+    } else if base_id.contains("image") {
+        0
+    } else {
+        1
+    };
+    (major, minor, importance)
+}
+
+fn join_gemini_scopes(base_ids: &[String]) -> String {
+    let mut sorted = base_ids.to_vec();
+    sorted.sort_by(|a, b| {
+        let ka = gemini_version_key(a);
+        let kb = gemini_version_key(b);
+        kb.cmp(&ka).then_with(|| a.cmp(b))
+    });
+
+    let formatted: Vec<String> = sorted
+        .into_iter()
+        .take(4)
+        .map(|id| format_model_id_scope(&id))
+        .collect();
+
+    if formatted.is_empty() {
+        return "Gemini".to_string();
+    }
+    if formatted.len() == 1 {
+        return formatted[0].clone();
+    }
+
+    let first_words: Vec<&str> = formatted[0].split_whitespace().collect();
+    let prefix2 = if first_words.len() >= 2 && first_words[0] == "Gemini" {
+        Some(format!("{} {} ", first_words[0], first_words[1]))
+    } else {
+        None
+    };
+    let prefix1 = if first_words.first() == Some(&"Gemini") {
+        Some("Gemini ".to_string())
+    } else {
+        None
+    };
+
+    let mut parts = Vec::with_capacity(formatted.len());
+    parts.push(formatted[0].clone());
+    for m in formatted.iter().skip(1) {
+        let shortened = if let Some(ref p2) = prefix2 {
+            if let Some(rest) = m.strip_prefix(p2.as_str()) {
+                rest.trim()
+            } else if let Some(ref p1) = prefix1 {
+                m.strip_prefix(p1.as_str()).map(str::trim).unwrap_or(m.as_str())
+            } else {
+                m.as_str()
+            }
+        } else if let Some(ref p1) = prefix1 {
+            m.strip_prefix(p1.as_str()).map(str::trim).unwrap_or(m.as_str())
+        } else {
+            m.as_str()
+        };
+        if !shortened.is_empty() && !parts.iter().any(|p| p == shortened) {
+            parts.push(shortened.to_string());
+        }
+    }
+    parts.join(" · ")
+}
+
+pub fn parse_daily_quotas(body: &Value) -> Vec<QuotaWindow> {
+    let Some(buckets) = body
         .get("buckets")
         .or_else(|| body.get("response").and_then(|r| r.get("buckets")))
-        .and_then(|b| b.as_array())?;
+        .and_then(|b| b.as_array())
+    else {
+        return Vec::new();
+    };
 
-    let mut parsed: Vec<(u8, f64, Option<chrono::DateTime<Utc>>, String)> = Vec::new();
+    let mut grouped: BTreeMap<String, (f64, Option<chrono::DateTime<Utc>>)> = BTreeMap::new();
 
     for b in buckets {
         let raw_model_id = match b.get("modelId").and_then(|m| m.as_str()) {
-            Some(id) => id,
-            None => continue,
+            Some(id) if !id.trim().is_empty() => id,
+            _ => continue,
         };
-        let model_id = raw_model_id.to_ascii_lowercase();
-        if !model_id.contains("gemini") {
+        if raw_model_id.trim().to_ascii_lowercase().starts_with("tab_") {
             continue;
         }
         let remaining_fraction = match b.get("remainingFraction").and_then(|f| f.as_f64()) {
             Some(f) if f.is_finite() => f,
             _ => continue,
         };
-        let tier = if model_id.contains("gemini-5") {
-            0
-        } else if model_id.contains("gemini-4") {
-            1
-        } else if model_id.contains("gemini-3.8-flash") {
-            2
-        } else if model_id.contains("gemini-") {
-            3
-        } else {
-            4
-        };
         let reset_time = b.get("resetTime").and_then(parse_time);
-        parsed.push((tier, remaining_fraction, reset_time, raw_model_id.to_string()));
+        let base_id = normalize_daily_model_base(raw_model_id);
+        if base_id.is_empty() || base_id.starts_with("tab_") {
+            continue;
+        }
+
+        grouped
+            .entry(base_id)
+            .and_modify(|(min_rem, best_reset)| {
+                if remaining_fraction < *min_rem {
+                    *min_rem = remaining_fraction;
+                    *best_reset = reset_time.or(*best_reset);
+                } else if (remaining_fraction - *min_rem).abs() < f64::EPSILON && best_reset.is_none() {
+                    *best_reset = reset_time;
+                }
+            })
+            .or_insert((remaining_fraction, reset_time));
     }
 
-    let best_tier = parsed.iter().map(|(tier, _, _, _)| *tier).min()?;
-    let (_, min_remaining, reset_time, best_model_id) = parsed
-        .into_iter()
-        .filter(|(tier, _, _, _)| *tier == best_tier)
-        .min_by(|a, b| {
-            a.1.total_cmp(&b.1)
-                .then_with(|| b.2.is_some().cmp(&a.2.is_some()))
-        })?;
+    let mut out = Vec::new();
+    let mut gemini_pools: BTreeMap<(i64, Option<i64>), (f64, Option<chrono::DateTime<Utc>>, Vec<String>)> =
+        BTreeMap::new();
 
-    let used_percent = ((1.0 - min_remaining) * 100.0).clamp(0.0, 100.0);
-    let scope = format_model_id_scope(&best_model_id);
-    Some(
-        QuotaWindow::new("gemini-5h", Some(300), used_percent)
-            .kind(WindowKind::Session)
-            .scope(scope)
-            .resets_at(reset_time),
-    )
+    for (base_id, (min_remaining, reset_time)) in grouped {
+        let used_percent = ((1.0 - min_remaining) * 100.0).clamp(0.0, 100.0);
+        if base_id.contains("argon") {
+            let scope = if base_id == "gemini-argon" {
+                "Gemini 4 Argon".to_string()
+            } else {
+                format_model_id_scope(&base_id)
+            };
+            out.push(
+                QuotaWindow::new(format!("daily-{base_id}"), Some(300), used_percent)
+                    .kind(WindowKind::Session)
+                    .scope(scope)
+                    .resets_at(reset_time),
+            );
+        } else if base_id.starts_with("gemini") {
+            let pool_key = ((used_percent * 100.0).round() as i64, reset_time.map(|t| t.timestamp()));
+            gemini_pools
+                .entry(pool_key)
+                .and_modify(|(_, _, ids)| ids.push(base_id.clone()))
+                .or_insert_with(|| (used_percent, reset_time, vec![base_id]));
+        } else {
+            let scope = format_model_id_scope(&base_id);
+            out.push(
+                QuotaWindow::new(format!("daily-{base_id}"), Some(300), used_percent)
+                    .kind(WindowKind::Session)
+                    .scope(scope)
+                    .resets_at(reset_time),
+            );
+        }
+    }
+
+    for (_, (used_percent, reset_time, base_ids)) in gemini_pools {
+        let id = if base_ids.len() == 1 {
+            format!("daily-{}", base_ids[0])
+        } else {
+            let mut sorted = base_ids.clone();
+            sorted.sort_by(|a, b| gemini_version_key(b).cmp(&gemini_version_key(a)).then_with(|| a.cmp(b)));
+            format!("daily-{}", sorted[0])
+        };
+        let scope = join_gemini_scopes(&base_ids);
+        out.push(
+            QuotaWindow::new(id, Some(300), used_percent)
+                .kind(WindowKind::Session)
+                .scope(scope)
+                .resets_at(reset_time),
+        );
+    }
+
+    out
+}
+
+/// Compatibility helper returning the tightest Gemini daily quota window if present.
+#[cfg(test)]
+pub fn parse_daily_gemini_quota(body: &Value) -> Option<QuotaWindow> {
+    parse_daily_quotas(body)
+        .into_iter()
+        .filter(|w| {
+            w.scope
+                .as_deref()
+                .is_some_and(|s| s.to_ascii_lowercase().contains("gemini"))
+        })
+        .max_by(|a, b| a.used_percent.total_cmp(&b.used_percent))
+}
+
+fn normalize_scope_for_match(s: &str) -> String {
+    s.to_ascii_lowercase()
+        .chars()
+        .map(|c| if c == '.' || c == '-' || c == '_' { ' ' } else { c })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn scope_already_covered(existing_windows: &[QuotaWindow], candidate_scope: &str) -> bool {
+    let norm_candidate = normalize_scope_for_match(candidate_scope);
+    let short_candidate = norm_candidate
+        .strip_prefix("gemini ")
+        .or_else(|| norm_candidate.strip_prefix("claude "))
+        .unwrap_or(norm_candidate.as_str());
+
+    existing_windows.iter().any(|existing| {
+        let Some(ref es) = existing.scope else {
+            return false;
+        };
+        let norm_es = normalize_scope_for_match(es);
+        norm_es == norm_candidate
+            || norm_es.contains(&norm_candidate)
+            || (short_candidate.len() >= 3 && norm_es.contains(short_candidate))
+    })
 }
 
 async fn fetch_ccpa_for_account(ctx: &Ctx, email: &str, token_info: &StoredToken) -> Result<Snapshot> {
@@ -708,9 +838,13 @@ async fn fetch_ccpa_for_account(ctx: &Ctx, email: &str, token_info: &StoredToken
     let mut snap = parse_quota_summary(&body)?;
     snap.account = Some(email.to_string());
 
-    if !has_gemini_window(&snap) {
-        if let Some(gemini_5h) = fetch_daily_gemini_quota(ctx, &active_token).await {
-            snap.windows.push(gemini_5h);
+    let daily_windows = fetch_daily_quotas(ctx, &active_token).await;
+    for w in daily_windows {
+        let Some(ref scope) = w.scope else {
+            continue;
+        };
+        if !scope_already_covered(&snap.windows, scope) {
+            snap.windows.push(w);
         }
     }
 
@@ -1251,20 +1385,20 @@ mod tests {
     }
 
     #[test]
-    fn ensure_account_models_complete_does_not_fabricate_missing_argon() {
+    fn finalize_does_not_fabricate_missing_argon_or_gemini_weekly() {
         let mut snap = Snapshot::new(ProviderId::Agy, "test");
         let email = "robin421@gmail.com";
-        // User has only Claude & GPT
         let mut claude_w = QuotaWindow::new("robin421_3p-weekly", Some(10080), 76.0)
             .kind(WindowKind::Weekly)
             .scope("Claude & GPT (robin421)");
         claude_w.account = Some(email.to_string());
         snap.windows.push(claude_w);
 
-        ensure_account_models_complete(&mut snap, email, true);
+        let snap = finalize_combined_snapshot(snap, &[email.to_string()], true, true, None, Some(email)).expect("ok");
 
-        let argon = snap.windows.iter().find(|w| w.scope.as_deref().is_some_and(is_argon_scope));
-        assert!(argon.is_none(), "missing argon must not be fabricated as a 100% used window");
+        assert_eq!(snap.windows.len(), 1);
+        assert!(snap.windows.iter().all(|w| !w.scope.as_deref().is_some_and(is_argon_scope)));
+        assert!(snap.windows.iter().all(|w| w.scope.as_deref() != Some("Gemini Models")));
     }
 
     #[test]
@@ -1357,7 +1491,8 @@ mod tests {
         assert_eq!(snap.account.as_deref(), Some("ok@example.com"));
         assert_eq!(snap.plan.as_deref(), Some("Pro"));
         assert!(snap.windows.iter().all(|w| w.account.as_deref() == Some("ok@example.com")));
-        assert_eq!(snap.windows.len(), 4);
+        assert_eq!(snap.windows.len(), 1, "must not invent Gemini or Claude rows the provider did not return");
+        assert!(snap.windows.iter().all(|w| w.scope.as_deref() != Some("Gemini Models")));
     }
 
     #[test]
@@ -1487,7 +1622,97 @@ mod tests {
     }
 
     #[test]
-    fn parse_daily_gemini_quota_picks_tightest_flash_bucket() {
+    fn parse_daily_quotas_extracts_all_models_and_deduplicates_thinking_tiers() {
+        let body = serde_json::json!({
+            "buckets": [
+                {
+                    "modelId": "claude-sonnet-4-6",
+                    "remainingFraction": 0.10,
+                    "resetTime": "2026-11-19T15:00:00Z"
+                },
+                {
+                    "modelId": "gemini-4-neon-high",
+                    "remainingFraction": 0.70,
+                    "resetTime": "2026-11-19T14:00:00Z"
+                },
+                {
+                    "modelId": "gemini-4-neon-low",
+                    "remainingFraction": 0.40,
+                    "resetTime": "2026-11-19T14:30:00Z"
+                },
+                {
+                    "modelId": "gemini-3.8-flash-tiered",
+                    "remainingFraction": 0.9398,
+                    "resetTime": "2026-11-19T16:30:00Z"
+                },
+                {
+                    "modelId": "gemini-3.8-flash-lite",
+                    "remainingFraction": 0.85,
+                    "resetTime": "2026-11-19T16:00:00Z"
+                },
+                {
+                    "modelId": "gpt-oss-120b",
+                    "remainingFraction": 0.50,
+                    "resetTime": "2026-11-19T18:00:00Z"
+                }
+            ]
+        });
+
+        let windows = parse_daily_quotas(&body);
+        assert_eq!(windows.len(), 4);
+
+        let claude = windows.iter().find(|w| w.id == "daily-claude-sonnet-4-6").expect("claude window");
+        assert_eq!(claude.scope.as_deref(), Some("Claude Sonnet 4 6"));
+        assert!((claude.used_percent - 90.0).abs() < 0.01);
+
+        let neon = windows.iter().find(|w| w.id == "daily-gemini-4-neon").expect("neon window");
+        assert_eq!(neon.scope.as_deref(), Some("Gemini 4 Neon"));
+        assert!((neon.used_percent - 60.0).abs() < 0.01);
+        assert_eq!(
+            neon.resets_at.map(|t| t.to_rfc3339()),
+            Some("2026-11-19T14:30:00+00:00".to_string())
+        );
+
+        let flash = windows.iter().find(|w| w.id == "daily-gemini-3.8-flash").expect("flash window");
+        assert_eq!(flash.scope.as_deref(), Some("Gemini 3.8 Flash"));
+        assert!((flash.used_percent - 15.0).abs() < 0.01);
+
+        let gpt = windows.iter().find(|w| w.id == "daily-gpt-oss-120b").expect("gpt window");
+        assert_eq!(gpt.scope.as_deref(), Some("GPT OSS 120B"));
+        assert!((gpt.used_percent - 50.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_daily_quotas_filters_tab_and_merges_shared_gemini_pool() {
+        let body = serde_json::json!({
+            "buckets": [
+                { "modelId": "tab_flash_lite_preview", "remainingFraction": 1.0, "resetTime": "2026-11-19T18:00:00Z" },
+                { "modelId": "tab_jump_flash_lite_preview", "remainingFraction": 1.0, "resetTime": "2026-11-19T18:00:00Z" },
+                { "modelId": "gemini-2.5-flash", "remainingFraction": 0.552, "resetTime": "2026-11-19T16:00:00Z" },
+                { "modelId": "gemini-3.5-flash", "remainingFraction": 0.552, "resetTime": "2026-11-19T16:00:00Z" },
+                { "modelId": "gemini-3.8-flash", "remainingFraction": 0.552, "resetTime": "2026-11-19T16:00:00Z" },
+                { "modelId": "gemini-4-hydrogen-sonar", "remainingFraction": 0.552, "resetTime": "2026-11-19T16:00:00Z" },
+                { "modelId": "gemini-4-argon", "remainingFraction": 0.0, "resetTime": "2026-11-25T00:00:00Z" }
+            ]
+        });
+
+        let windows = parse_daily_quotas(&body);
+        assert_eq!(windows.len(), 2, "tab_* must be filtered and shared Gemini pool merged into 1 + 1 argon");
+        assert!(windows.iter().all(|w| !w.id.contains("tab_")));
+
+        let argon = windows.iter().find(|w| w.scope.as_deref().is_some_and(|s| s.contains("Argon"))).expect("argon");
+        assert!((argon.used_percent - 100.0).abs() < 0.01);
+
+        let merged = windows.iter().find(|w| !w.scope.as_deref().unwrap_or("").contains("Argon")).expect("merged gemini");
+        assert_eq!(
+            merged.scope.as_deref(),
+            Some("Gemini 4 Hydrogen Sonar · 3.8 Flash · 3.5 Flash · 2.5 Flash")
+        );
+        assert!((merged.used_percent - 44.8).abs() < 0.01);
+    }
+
+    #[test]
+    fn parse_daily_gemini_quota_compatibility_picks_tightest_gemini() {
         let body = serde_json::json!({
             "buckets": [
                 {
@@ -1501,11 +1726,6 @@ mod tests {
                     "resetTime": "2026-11-19T14:00:00Z"
                 },
                 {
-                    "modelId": "gemini-3.8-flash-tiered",
-                    "remainingFraction": 0.9398,
-                    "resetTime": "2026-11-19T16:30:00Z"
-                },
-                {
                     "modelId": "gemini-3.8-flash-lite",
                     "remainingFraction": 0.85,
                     "resetTime": "2026-11-19T16:00:00Z"
@@ -1513,55 +1733,12 @@ mod tests {
             ]
         });
 
-        let w = parse_daily_gemini_quota(&body).expect("should parse gemini 5h window");
-        assert_eq!(w.id, "gemini-5h");
+        let w = parse_daily_gemini_quota(&body).expect("should parse tightest gemini window");
+        assert_eq!(w.id, "daily-gemini-2.5-pro");
         assert_eq!(w.window_mins, Some(300));
         assert_eq!(w.kind, WindowKind::Session);
-        assert_eq!(w.scope.as_deref(), Some("Gemini 3.8 Flash"));
-        assert!((w.used_percent - 15.0).abs() < 0.01);
-        assert_eq!(
-            w.resets_at.map(|t| t.to_rfc3339()),
-            Some("2026-11-19T16:00:00+00:00".to_string())
-        );
-    }
-
-    #[test]
-    fn parse_daily_gemini_quota_falls_back_and_handles_missing() {
-        let gemini4_body = serde_json::json!({
-            "buckets": [
-                {
-                    "modelId": "gemini-2.5-flash",
-                    "remainingFraction": 0.50,
-                    "resetTime": "2026-11-19T15:00:00Z"
-                },
-                {
-                    "modelId": "gemini-4-pro",
-                    "remainingFraction": 0.72,
-                    "resetTime": "2026-11-19T17:00:00Z"
-                }
-            ]
-        });
-        let w = parse_daily_gemini_quota(&gemini4_body).expect("should match gemini-4 tier");
-        assert_eq!(w.scope.as_deref(), Some("Gemini 4 Pro"));
-        assert!((w.used_percent - 28.0).abs() < 0.01);
-
-        let hydrogen_body = serde_json::json!({
-            "buckets": [
-                {
-                    "modelId": "gemini-3.8-flash-tiered",
-                    "remainingFraction": 0.90,
-                    "resetTime": "2026-11-19T16:30:00Z"
-                },
-                {
-                    "modelId": "gemini-4-hydrogen-sonar",
-                    "remainingFraction": 0.65,
-                    "resetTime": "2026-11-19T17:00:00Z"
-                }
-            ]
-        });
-        let w_hydrogen = parse_daily_gemini_quota(&hydrogen_body).expect("should match gemini-4-hydrogen-sonar");
-        assert_eq!(w_hydrogen.scope.as_deref(), Some("Gemini 4 Hydrogen"));
-        assert!((w_hydrogen.used_percent - 35.0).abs() < 0.01);
+        assert_eq!(w.scope.as_deref(), Some("Gemini 2.5 Pro"));
+        assert!((w.used_percent - 80.0).abs() < 0.01);
 
         let no_gemini = serde_json::json!({
             "buckets": [
@@ -1572,6 +1749,24 @@ mod tests {
             ]
         });
         assert!(parse_daily_gemini_quota(&no_gemini).is_none());
+    }
+
+    #[test]
+    fn scope_already_covered_avoids_duplicate_models() {
+        let existing = vec![
+            QuotaWindow::new("g-wk", Some(10080), 10.0)
+                .kind(WindowKind::Weekly)
+                .scope("Gemini 4 Neon · Hydrogen · Orchestrator"),
+            QuotaWindow::new("3p-wk", Some(10080), 20.0)
+                .kind(WindowKind::Weekly)
+                .scope("Claude Opus 5.5 · Sonnet 5.5 · GPT-OSS 120B"),
+        ];
+        assert!(scope_already_covered(&existing, "Gemini 4 Neon"));
+        assert!(scope_already_covered(&existing, "Claude Sonnet 5.5"));
+        assert!(scope_already_covered(&existing, "Claude Opus 5 5"));
+        assert!(scope_already_covered(&existing, "GPT OSS 120B"));
+        assert!(!scope_already_covered(&existing, "Gemini 4 Argon"));
+        assert!(!scope_already_covered(&existing, "Gemini 3.8 Flash"));
     }
 
     #[test]
@@ -1605,7 +1800,7 @@ mod tests {
                 "Gemini Models",
                 Some("Models within this group: Gemini 4 Neon, Gemini 4 Hydrogen, Orchestrator (Neon), Gemini 3.8 Flash")
             ),
-            "Gemini 4 Neon · Hydrogen"
+            "Gemini 4 Neon · Hydrogen · Orchestrator · 3.8 Flash"
         );
 
         assert_eq!(
@@ -1613,7 +1808,7 @@ mod tests {
                 "Claude and GPT models",
                 Some("Models within this group: Claude Opus 5.5, Claude Sonnet 5.5, GPT-OSS 120B")
             ),
-            "Claude Opus 5.5 · Sonnet 5.5"
+            "Claude Opus 5.5 · Sonnet 5.5 · GPT-OSS 120B"
         );
 
         assert_eq!(
@@ -1632,7 +1827,7 @@ mod tests {
     }
 
     #[test]
-    fn ensure_account_models_complete_does_not_duplicate_dynamic_scopes() {
+    fn finalize_keeps_real_windows_without_inventing_siblings() {
         let mut snap = Snapshot::new(ProviderId::Agy, "antigravity_ls");
         let email = "togxida@gmail.com";
 
@@ -1658,9 +1853,9 @@ mod tests {
         c_wk.account = Some(email.to_string());
 
         snap.windows.extend([g_5h, g_wk, argon, c_5h, c_wk]);
-        ensure_account_models_complete(&mut snap, email, true);
+        let snap = finalize_combined_snapshot(snap, &[email.to_string()], true, false, None, Some(email)).expect("ok");
 
-        assert_eq!(snap.windows.len(), 5, "should not duplicate any dynamic scope windows");
+        assert_eq!(snap.windows.len(), 5, "real windows stay, missing siblings are not invented");
     }
 
     #[test]

@@ -27,7 +27,7 @@ pub struct Settings {
     pub notify_restored: bool,
     pub disabled: HashSet<ProviderId>,
     pub api_keys: HashMap<ProviderId, String>,
-    /// "auto", "zh" or "en".
+    /// "auto", "zh", "en", "ja" or "ko".
     pub language: String,
     /// "system", "light" or "dark".
     pub theme: String,
@@ -83,6 +83,8 @@ impl Settings {
         match self.language.as_str() {
             "zh" => Lang::Zh,
             "en" => Lang::En,
+            "ja" => Lang::Ja,
+            "ko" => Lang::Ko,
             _ => Lang::from_locale(&sys_locale::get_locale().unwrap_or_default()),
         }
     }
